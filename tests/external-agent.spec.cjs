@@ -227,6 +227,7 @@ test('导入外部 Agent（OpenClaw 与本地 CLI+MCP）：自动探测能力、
 
     // 导入外部 Agent 1：OpenClaw Gateway（仅对话+工作流，不支持工作台 MCP）
     await page.locator('#provider-import-agent').click();
+    await page.locator('#provider-manual-details > summary').click();
     await page.locator('#provider-name').fill('OpenClaw Bot');
     await page.locator('#provider-url').fill(ocSrv.url);
     await page.locator('#provider-key').fill('oc-tok-1');
@@ -240,6 +241,7 @@ test('导入外部 Agent（OpenClaw 与本地 CLI+MCP）：自动探测能力、
 
     // 导入外部 Agent 2：本地 CLI + MCP（全能力通过，含 workbench_probe_ping 实测回环）
     await page.locator('#provider-import-agent').click();
+    await page.locator('#provider-manual-details > summary').click();
     await page.locator('#provider-agent-transport').selectOption('external-cli');
     await page.locator('#provider-name').fill('CLI 全能助手');
     await page.locator('#provider-cli-command').fill(process.execPath);
@@ -310,5 +312,141 @@ test('导入外部 Agent（OpenClaw 与本地 CLI+MCP）：自动探测能力、
     await ocSrv.close().catch(() => {});
     await fs.promises.rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(() => {});
     await fs.promises.rm(tempDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(() => {});
+  }
+});
+
+test('Agent Connect MCP 自包含目录：源 Agent 仅凭读文件+MCP自主连接，桌面端自动刷新并标明工作台可用性', async () => {
+  const { spawn } = require('node:child_process');
+  const ocSrv = await startMockOpenClaw('oc-tok-1');
+  const profileDir = fs.mkdtempSync(path.join(ROOT, '.pset-'));
+  const app = await electron.launch({
+    executablePath: path.join(ROOT, 'node_modules/electron/dist/electron.exe'),
+    args: [ROOT, '--user-data-dir=' + profileDir],
+    cwd: ROOT,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined }
+  });
+  let mcpChild = null;
+  try {
+    const page = await app.firstWindow();
+    await page.waitForLoadState('load');
+    if (await page.locator('#first-launch').isVisible().catch(() => false)) {
+      await page.locator('[data-action="dismiss-first-launch"]').click();
+    }
+    await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setContentSize(1500, 960));
+
+    await page.locator('[data-route="settings"]').click();
+    await page.locator('#settings-tab-toggles').click();
+    await page.locator('#ui-toggles input[data-composer-toggle="provider"]').check({ force: true });
+    await page.locator('#settings-tab-llm').click();
+
+    await page.locator('#provider-import-agent').click();
+    await expect(page.locator('#provider-copy-prompt')).toBeEnabled({ timeout: 10000 });
+    await expect(page.locator('#provider-pairing-status')).toContainText('本地 Connect MCP 已就绪', { timeout: 10000 });
+
+    // 验证极简提示词指向本机 agent-connect/CONNECT.md，且完整 MCP 包已自动部署就绪
+    await page.locator('#provider-prompt-preview summary').click();
+    const promptText = await page.locator('#provider-pairing-prompt-text').inputValue();
+    expect(promptText).toContain('CONNECT.md');
+    expect(promptText.split('\n').length).toBeLessThanOrEqual(6);
+
+    const connectDir = path.join(profileDir, 'agent-connect');
+    expect(fs.existsSync(path.join(connectDir, 'CONNECT.md'))).toBe(true);
+    expect(fs.existsSync(path.join(connectDir, 'pairing.json'))).toBe(true);
+    expect(fs.existsSync(path.join(connectDir, 'mcp-config.json'))).toBe(true);
+    expect(fs.existsSync(path.join(connectDir, 'mcp-server.cjs'))).toBe(true);
+
+    // 模拟外部源 Agent 读取 mcp-config.json 并启动本地 Connect MCP Server
+    const mcpCfg = JSON.parse(fs.readFileSync(path.join(connectDir, 'mcp-config.json'), 'utf8'));
+    const entry = mcpCfg.mcpServers['pi-workbench-connect'];
+    mcpChild = spawn(entry.command, entry.args, {
+      env: { ...process.env, ...(entry.env || {}) },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      windowsHide: true
+    });
+    const pendingRpc = new Map();
+    let rpcBuf = '';
+    mcpChild.stdout.on('data', chunk => {
+      rpcBuf += chunk.toString();
+      let nl;
+      while ((nl = rpcBuf.indexOf('\n')) >= 0) {
+        const line = rpcBuf.slice(0, nl).trim();
+        rpcBuf = rpcBuf.slice(nl + 1);
+        if (!line) continue;
+        const msg = JSON.parse(line);
+        if (pendingRpc.has(msg.id)) {
+          const resolve = pendingRpc.get(msg.id);
+          pendingRpc.delete(msg.id);
+          resolve(msg);
+        }
+      }
+    });
+    const callRpc = (method, params) => new Promise((resolve, reject) => {
+      const id = 'e2e_' + Math.random().toString(36).slice(2, 8);
+      pendingRpc.set(id, resolve);
+      mcpChild.stdin.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
+      setTimeout(() => { if (pendingRpc.delete(id)) reject(new Error('MCP RPC timeout: ' + method)); }, 15000);
+    });
+
+    await callRpc('initialize', { protocolVersion: '2024-11-05', capabilities: {}, clientInfo: { name: 'mock-source-agent', version: '1.0' } });
+
+    // 前置判断：若不支持任何本地访问会被过滤；支持则通过 pi_workbench_register_agent 自主接入
+    const compatNo = await callRpc('tools/call', { name: 'pi_workbench_check_compatibility', arguments: { hasMcp: false, hasShellOrHttp: false, hasDirectEntry: false } });
+    expect(JSON.parse(compatNo.result.content[0].text).eligible).toBe(false);
+
+    // 场景 A：源 Agent 上报 OpenClaw（不支持工作台） -> 桌面端不点任何按钮自动刷新并标明“工作台：不可用 ✕”
+    await callRpc('tools/call', {
+      name: 'pi_workbench_register_agent',
+      arguments: { name: '自主OpenClaw', agentTransport: 'openclaw-gateway', baseUrl: ocSrv.url, apiKey: 'oc-tok-1', models: ['main'] }
+    });
+    await expect(page.locator('#provider-pairing-status')).toContainText('已连入：自主OpenClaw', { timeout: 15000 });
+    await expect(page.locator('#provider-pairing-status')).toContainText('工作台：不可用', { timeout: 10000 });
+    await expect(page.locator('[data-cap-key="workbench"]')).toHaveClass(/off/);
+
+    // 场景 B：第二个源 Agent 接入 MCP 在线接力（支持工作台） -> 自动刷新标明“工作台：可用 ✓”并在工作台接力执行
+    await page.locator('#provider-import-agent').click();
+    const relayReg = await callRpc('tools/call', {
+      name: 'pi_workbench_register_agent',
+      arguments: { name: 'WorkBuddy接力', agentTransport: 'mcp-relay', models: ['relay-main'] }
+    });
+    const relayProfileId = JSON.parse(relayReg.result.content[0].text).profileId;
+    await expect(page.locator('#provider-pairing-status')).toContainText('已连入：WorkBuddy接力', { timeout: 15000 });
+    await expect(page.locator('#provider-pairing-status')).toContainText('工作台：可用', { timeout: 10000 });
+    await expect(page.locator('[data-cap-key="workbench"]')).toHaveClass(/ok/);
+
+    // 切到聊天再打开工作台：不支持工作台的“自主OpenClaw”自动隐藏，“WorkBuddy接力”可用且在同连接完成工作台动作
+    await page.locator('[data-route="workbenches"]').click();
+    await page.locator('[data-action="open-workbench"][data-key="builder"]').click();
+    await expect(page.locator('#composer-provider option')).toHaveText(['WorkBuddy接力'], { timeout: 10000 });
+
+    // 后台模拟源 MCP Agent 持续轮询接单 + 调用 workbench_action + 提交结果
+    let workerActive = true;
+    const workerLoop = (async () => {
+      while (workerActive) {
+        const res = await callRpc('tools/call', { name: 'pi_workbench_await_task', arguments: { profileId: relayProfileId, timeoutMs: 5000 } }).catch(() => null);
+        if (!res) break;
+        const data = JSON.parse(res.result.content[0].text);
+        if (!data.idle && data.task) {
+          const wbRes = await callRpc('tools/call', { name: 'workbench_action', arguments: { command: 'readDesignWorkflow', payload: {} } });
+          await callRpc('tools/call', {
+            name: 'pi_workbench_submit_result',
+            arguments: { profileId: relayProfileId, requestId: data.task.requestId, text: 'RELAY_WB_OK:' + wbRes.result.content[0].text }
+          });
+          break;
+        }
+      }
+    })();
+
+    await page.evaluate(() => { window.__ev = []; window.piDesktop.agent.onEvent(e => window.__ev.push(e)); });
+    await page.locator('#message-input').fill('用MCP接力读取工作台');
+    await page.locator('#composer').evaluate(f => f.requestSubmit());
+    await page.waitForFunction(() => window.__ev?.some(e => e.type === 'agent_settled'), null, { timeout: 30000 });
+    workerActive = false;
+    await workerLoop;
+    await expect(page.locator('.messages')).toContainText('RELAY_WB_OK:');
+  } finally {
+    mcpChild?.kill();
+    await app.close().catch(() => {});
+    await ocSrv.close().catch(() => {});
+    await fs.promises.rm(profileDir, { recursive: true, force: true, maxRetries: 10, retryDelay: 300 }).catch(() => {});
   }
 });

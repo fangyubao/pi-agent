@@ -8,6 +8,8 @@ const BRIDGE_TOKEN = String(process.env.PI_WORKBENCH_BRIDGE_TOKEN || '');
 const APPROVAL_MODE = process.env.PI_WORKBENCH_APPROVAL_MODE === 'full' ? 'full' : 'ask';
 const PROBE_PORT = Number(process.env.PI_WORKBENCH_PROBE_PORT || 0);
 const PROBE_TOKEN = String(process.env.PI_WORKBENCH_PROBE_TOKEN || '');
+const CONNECT_ARG_IDX = process.argv.indexOf('--connect-url');
+const CONNECT_URL = CONNECT_ARG_IDX >= 0 ? String(process.argv[CONNECT_ARG_IDX + 1] || '') : '';
 
 function callBridge(command, payload = {}) {
   if (!BRIDGE_PORT || !BRIDGE_TOKEN) {
@@ -159,8 +161,40 @@ function send(msg) {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
+function forwardToHttpMcp(msg) {
+  return new Promise((resolve, reject) => {
+    const uri = new URL(CONNECT_URL);
+    const body = JSON.stringify(msg);
+    const req = http.request({
+      hostname: uri.hostname,
+      port: Number(uri.port || 80),
+      path: uri.pathname + uri.search,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+    }, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => {
+        if (res.statusCode === 202 || !data.trim()) { resolve(null); return; }
+        try { resolve(JSON.parse(data)); } catch (err) { reject(err); }
+      });
+    });
+    req.on('error', reject);
+    req.end(body);
+  });
+}
+
 async function handleMessage(msg) {
   if (!msg || typeof msg !== 'object') return;
+  if (CONNECT_URL) {
+    try {
+      const reply = await forwardToHttpMcp(msg);
+      if (reply && msg.id !== undefined) send(reply);
+    } catch (error) {
+      if (msg.id !== undefined) send({ jsonrpc: '2.0', id: msg.id, error: { code: -32000, message: String(error?.message || error) } });
+    }
+    return;
+  }
   const { id, method, params } = msg;
   if (!method) return;
   if (method === 'notifications/initialized' || id === undefined) return;

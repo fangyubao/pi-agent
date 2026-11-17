@@ -471,9 +471,15 @@ async function cliExchange({
   }
 }
 
-async function exchange(cfg, { system = '', user = '', sessionKey, thinking, maxTokens = 2000, timeoutMs = 60000, signal, onDelta, mcpEnv, cwd, approval = 'ask' } = {}) {
+async function exchange(cfg, { system = '', user = '', sessionKey, thinking, maxTokens = 2000, timeoutMs = 60000, signal, onDelta, mcpEnv, cwd, approval = 'ask', mode = 'chat', relayDispatch } = {}) {
   const transport = cfg?.agentTransport || cfg?.provider;
   const fullPrompt = system ? `${system}\n\n${user}` : String(user || '');
+  if (transport === 'mcp-relay') {
+    if (typeof relayDispatch !== 'function') throw new Error('MCP 在线接力调度器未就绪');
+    const out = await relayDispatch(cfg.profileId || cfg.id, { system, user, mode, timeoutMs, signal });
+    if (out?.text && onDelta) onDelta(out.text);
+    return out;
+  }
   if (transport === 'openclaw-gateway') {
     return openClawExchange({
       gatewayUrl: cfg.baseUrl,
@@ -600,9 +606,31 @@ async function probeApiVision(cfg, { fetchImpl = fetch, timeoutMs = 15000 } = {}
   }
 }
 
-async function probeCapabilities(cfg, { callModelImpl, probeImpl, timeoutMs = 25000 } = {}) {
+async function probeCapabilities(cfg, { callModelImpl, probeImpl, relayOnline, timeoutMs = 25000 } = {}) {
   const checks = {};
   const external = isExternalAgent(cfg);
+
+  if (cfg?.agentTransport === 'mcp-relay') {
+    const online = typeof relayOnline === 'function' ? Boolean(relayOnline(cfg.profileId || cfg.id)) : Boolean(cfg?.capabilities?.chat);
+    checks.chat = online ? '源 Agent 已通过本地 MCP 在线接力接入' : '源 Agent 当前处于离线待连接状态';
+    checks.workflow = 'MCP 在线接力模式支持工作流串行调度（并发上限 1）';
+    checks.workbench = '源 Agent 通过同一 MCP 会话即可访问 workbench_action 工作台工具';
+    checks.vision = '外部 MCP 接力默认按文本上下文处理';
+    return {
+      ok: online,
+      ...(online ? {} : { error: 'MCP 在线接力当前未检测到源 Agent 活跃轮询，请先在源 Agent 中启动轮询' }),
+      capabilities: normalizeCapabilities({
+        chat: true,
+        workflow: true,
+        workbench: true,
+        vision: false,
+        maxConcurrency: 1,
+        mode: 'probed',
+        checkedAt: Date.now(),
+        checks
+      }, cfg)
+    };
+  }
 
   if (!external) {
     // 1. 普通 API：流式基础通信

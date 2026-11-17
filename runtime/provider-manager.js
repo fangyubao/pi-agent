@@ -33,5 +33,24 @@
     if (api?.parseAgentImport) return api.parseAgentImport(input);
     return { ok: false, error: '浏览器预览模式不支持 AI 解析，请在桌面应用中使用。' };
   }
-  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport });
+  async function startPairing(input) {
+    const api = desktop();
+    if (api?.startPairing) return api.startPairing(input);
+    return { ok: false, error: '浏览器预览模式不支持本地配对服务，请在桌面应用中使用。' };
+  }
+  async function pairingStatus() {
+    const api = desktop();
+    if (api?.pairingStatus) return api.pairingStatus();
+    return { ok: false, status: 'idle' };
+  }
+  async function openConnectDir() {
+    const api = desktop();
+    if (api?.openConnectDir) return api.openConnectDir();
+    return { ok: false, error: '浏览器预览模式不支持打开本地目录' };
+  }
+  function onUpdated(callback) {
+    const api = desktop();
+    return api?.onUpdated ? api.onUpdated(callback) : () => {};
+  }
+  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport, startPairing, pairingStatus, openConnectDir, onUpdated });
 })();

@@ -16,6 +16,12 @@
       label: '本地命令行 CLI Agent（可挂 MCP）',
       defaultBase: '',
       hint: '通过本机命令拉起外部 Agent CLI（支持按标准 MCP 暴露工作台工具）'
+    },
+    {
+      id: 'mcp-relay',
+      label: 'MCP 在线接力（源 Agent 主动连接）',
+      defaultBase: '',
+      hint: '源 Agent 通过本机 MCP 服务主动接入并轮询接取对话、工作流与工作台任务'
     }
   ];
 
@@ -23,7 +29,7 @@
 
   function isExternalAgent(profile) {
     if (!profile || typeof profile !== 'object') return false;
-    return profile.kind === 'external-agent' || ['openclaw-gateway', 'external-cli'].includes(profile.agentTransport || profile.provider);
+    return profile.kind === 'external-agent' || ['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(profile.agentTransport || profile.provider);
   }
 
   function defaultCapabilities(profile) {

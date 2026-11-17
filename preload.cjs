@@ -61,6 +61,14 @@ contextBridge.exposeInMainWorld('piDesktop', Object.freeze({
     test: config => ipcRenderer.invoke('provider:test', config),
     probeCapabilities: config => ipcRenderer.invoke('provider:probe-capabilities', config),
     parseAgentImport: input => ipcRenderer.invoke('provider:parse-agent-import', input),
+    startPairing: input => ipcRenderer.invoke('provider:pairing-start', input),
+    pairingStatus: () => ipcRenderer.invoke('provider:pairing-status'),
+    openConnectDir: () => ipcRenderer.invoke('provider:open-connect-dir'),
+    onUpdated: callback => {
+      const listener = (_event, payload) => callback(payload);
+      ipcRenderer.on('provider:updated', listener);
+      return () => ipcRenderer.removeListener('provider:updated', listener);
+    },
     saveTiers: tiers => ipcRenderer.invoke('provider:save-tiers', { tiers })
   }),
   clipboard: Object.freeze({ writeText: text => ipcRenderer.invoke('clipboard:write', text) }),

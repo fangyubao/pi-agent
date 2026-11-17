@@ -10,15 +10,19 @@ const { createPool: createMcpPool } = require('./runtime/mcp-pool.cjs');
 const { callModel } = require('./runtime/provider-call.cjs');
 const externalAgent = require('./runtime/external-agent.cjs');
 const providerCapabilities = require('./runtime/provider-capabilities.js');
+const { createPairingServer } = require('./runtime/agent-pairing-server.cjs');
+let pairingServer = null;
 function callTextModel(cfg, request, options = {}) {
   if (providerCapabilities.isExternalAgent(cfg)) {
     return externalAgent.exchange(cfg, {
       system: request.system,
       user: request.user,
       sessionKey: options.sessionKey,
+      mode: options.mode || 'workflow',
       thinking: request.effort || cfg.effort || 'off',
       timeoutMs: options.timeoutMs || 60000,
-      signal: options.signal
+      signal: options.signal,
+      relayDispatch: (pid, req) => pairingServer ? pairingServer.dispatchRelayTask(pid, req) : Promise.reject(new Error('MCP 配对服务未启动'))
     });
   }
   return callModel(cfg, request, options);
@@ -121,13 +125,14 @@ function publicProfile(profile = {}) {
   const model = profile.model || '';
   const capability = modelCapabilities.selected(profile, model);
   const external = providerCapabilities.isExternalAgent(profile);
-  const transport = external ? (profile.agentTransport === 'external-cli' ? 'external-cli' : 'openclaw-gateway') : '';
+  const transport = external ? (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(profile.agentTransport) ? profile.agentTransport : (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(profile.provider) ? profile.provider : 'openclaw-gateway')) : '';
   const defaultBase = external ? (transport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
   return {
     id: profile.id || 'default',
     name: profile.name || profile.provider || (external ? '外部 Agent' : 'API'),
     kind: external ? 'external-agent' : 'api',
     agentTransport: transport,
+    relayOnline: transport === 'mcp-relay' ? Boolean(pairingServer?.isRelayOnline(profile.id)) : undefined,
     provider: profile.provider || (external ? transport : 'openai-compatible'),
     baseUrl: profile.baseUrl !== undefined ? profile.baseUrl : defaultBase,
     command: String(profile.command || ''),
@@ -195,7 +200,8 @@ async function effectiveProvider(input = {}) {
   const profiles = providerProfiles(stored);
   const selected = input.profileId ? (profiles.find(x => x.id === input.profileId) || {}) : (profiles.find(x => x.id === stored.activeProfileId) || profiles[0] || stored);
   const external = input.kind === 'external-agent' || (input.kind !== 'api' && providerCapabilities.isExternalAgent(selected)) || providerCapabilities.isExternalAgent(input);
-  const agentTransport = external ? (input.agentTransport === 'external-cli' ? 'external-cli' : input.agentTransport === 'openclaw-gateway' ? 'openclaw-gateway' : (selected.agentTransport || 'openclaw-gateway')) : '';
+  const rawTransport = input.agentTransport || selected.agentTransport || (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(selected.provider) ? selected.provider : '');
+  const agentTransport = external ? (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(rawTransport) ? rawTransport : 'openclaw-gateway') : '';
   const fallbackBase = external ? (agentTransport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
   const rawUrl = input.baseUrl !== undefined ? input.baseUrl : (selected.baseUrl !== undefined ? selected.baseUrl : fallbackBase);
   const normalizedBase = cleanUrl(rawUrl, external);
@@ -211,6 +217,7 @@ async function effectiveProvider(input = {}) {
     promptMode: (input.promptMode || selected.promptMode) === 'arg' ? 'arg' : 'stdin',
     mcpSupport: (input.mcpSupport || selected.mcpSupport) === 'none' ? 'none' : 'mcp-config',
     capabilities: providerCapabilities.normalizeCapabilities(input.capabilities || selected.capabilities, { kind: external ? 'external-agent' : 'api', agentTransport }),
+    id: selected.id || input.profileId || 'default',
     model,
     models: Array.isArray(input.models) ? input.models.slice(0, 4) : (Array.isArray(selected.models) ? selected.models : []),
     effort: selected.modelEfforts?.[model] || 'off',
@@ -1046,9 +1053,10 @@ if(primaryInstance)app.whenReady().then(() => {
     const chosen=typeof input.model==='string'?input.model:(previous.model||'');
     const capsLib = typeof providerCapabilities === 'object' ? providerCapabilities : null;
     const extLib = typeof externalAgent === 'object' ? externalAgent : null;
-    const isExtObj = o => Boolean(o && typeof o === 'object' && (o.kind === 'external-agent' || ['openclaw-gateway', 'external-cli'].includes(o.agentTransport || o.provider)));
+    const isExtObj = o => Boolean(o && typeof o === 'object' && (o.kind === 'external-agent' || ['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(o.agentTransport || o.provider)));
     const isExternal = input.kind === 'external-agent' || (input.kind !== 'api' && (capsLib ? capsLib.isExternalAgent(previous) : isExtObj(previous))) || (capsLib ? capsLib.isExternalAgent(input) : isExtObj(input));
-    const agentTransport = isExternal ? (input.agentTransport === 'external-cli' ? 'external-cli' : input.agentTransport === 'openclaw-gateway' ? 'openclaw-gateway' : (previous.agentTransport || 'openclaw-gateway')) : '';
+    const rawTransport = input.agentTransport || previous.agentTransport || (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(previous.provider) ? previous.provider : '');
+    const agentTransport = isExternal ? (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(rawTransport) ? rawTransport : 'openclaw-gateway') : '';
     const fallbackUrl = isExternal ? (agentTransport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
     const rawUrl = input.baseUrl !== undefined ? input.baseUrl : (previous.baseUrl !== undefined ? previous.baseUrl : fallbackUrl);
     const parsedArgs = Array.isArray(input.args)
@@ -1128,7 +1136,7 @@ if(primaryInstance)app.whenReady().then(() => {
     try {
       const cfg = await effectiveProvider(input);
       if (providerCapabilities.isExternalAgent(cfg)) {
-        const res = await externalAgent.probeCapabilities(cfg, { timeoutMs: 25000 });
+        const res = await externalAgent.probeCapabilities(cfg, { timeoutMs: 25000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
         return { ok: res.ok, message: res.capabilities?.checks?.chat || '外部 Agent 连接正常', error: res.error, capabilities: res.capabilities };
       }
       return await require('./runtime/provider-probe.cjs').probe(cfg);
@@ -1138,8 +1146,192 @@ if(primaryInstance)app.whenReady().then(() => {
     try {
       checkShell(event);
       const cfg = await effectiveProvider(input);
-      return await externalAgent.probeCapabilities(cfg, { timeoutMs: 30000 });
+      return await externalAgent.probeCapabilities(cfg, { timeoutMs: 30000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
     } catch (error) { return { ok: false, error: agentRecovery.redact(error.message) }; }
+  });
+  function invokeBridgeRequest(command, payload = {}) {
+    return new Promise((resolve, reject) => {
+      if (!activeRun || activeRun.cancelled || activeRun.done) {
+        reject(new Error('当前没有活动中的工作台或对话任务'));
+        return;
+      }
+      if (command === 'readTaskContext') {
+        try { resolve(contextTransport.readTaskContext(activeRun.input.context, payload)); }
+        catch (err) { reject(err); }
+        return;
+      }
+      if (command !== '__memory_proposal__' && !allowedWorkbenchActions.has(command)) {
+        reject(new Error('当前运行任务未声明该工作台动作：' + command));
+        return;
+      }
+      const id = 'mcp_rly_' + require('node:crypto').randomBytes(6).toString('hex');
+      const virtualSocket = {
+        destroyed: false,
+        once() {},
+        write(raw) { settle(raw); },
+        end(raw) { settle(raw); }
+      };
+      const timer = setTimeout(() => {
+        pendingWorkbenchRequests.delete(id);
+        reject(new Error('工作台动作响应超时：' + command));
+      }, command === 'verifyWorkbench' ? 200000 : 30000);
+      timer.unref?.();
+      function settle(raw) {
+        clearTimeout(timer);
+        pendingWorkbenchRequests.delete(id);
+        try {
+          const msg = JSON.parse(String(raw || '').trim());
+          if (msg.ok) resolve(msg.result);
+          else reject(new Error(msg.error || '工作台动作失败'));
+        } catch (err) { reject(err); }
+      }
+      pendingWorkbenchRequests.set(id, virtualSocket);
+      for (const win of BrowserWindow.getAllWindows()) {
+        win.webContents.send('agent:workbench-request', { id, taskId: activeRun.taskId, command, payload });
+      }
+    });
+  }
+  function getPairingServer() {
+    if (pairingServer) return pairingServer;
+    pairingServer = createPairingServer({
+      nodePath: process.execPath,
+      bundleDir: path.join(app.getPath('userData'), 'agent-connect'),
+      mcpScriptPath: path.join(__dirname, 'runtime', 'workbench-mcp-server.cjs').replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked'),
+      onWorkbenchAction: (cmd, payload) => invokeBridgeRequest(cmd, payload),
+      onReadTaskContext: payload => invokeBridgeRequest('readTaskContext', payload),
+      onMemoryProposal: payload => invokeBridgeRequest('__memory_proposal__', payload),
+      async onRegister(payload = {}, meta = {}) {
+        const external = payload.kind === 'api' ? false : true;
+        const transport = external
+          ? (['openclaw-gateway', 'external-cli', 'mcp-relay'].includes(payload.agentTransport) ? payload.agentTransport : 'external-cli')
+          : '';
+        const fallbackUrl = external ? (transport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
+        const baseUrl = cleanUrl(payload.baseUrl !== undefined ? payload.baseUrl : fallbackUrl, external);
+        const rawModels = Array.isArray(payload.models) ? payload.models.map(x => String(x || '').trim()).filter(Boolean) : [];
+        const models = rawModels.length ? [...new Set(rawModels)].slice(0, 4) : [transport === 'mcp-relay' ? 'relay-main' : 'main'];
+        const id = String(payload.profileId || payload.id || ('agent-' + require('node:crypto').randomBytes(4).toString('hex')));
+        const rawKey = String(payload.apiKey || payload.token || '').trim();
+        const candidate = {
+          profileId: id,
+          id,
+          name: String(payload.name || '外部 Agent').trim().slice(0, 60) || '外部 Agent',
+          kind: external ? 'external-agent' : 'api',
+          agentTransport: transport,
+          provider: external ? transport : String(payload.provider || 'openai-compatible'),
+          baseUrl,
+          command: external && transport === 'external-cli' ? String(payload.command || '').trim() : '',
+          args: external && transport === 'external-cli' ? externalAgent.parseArgsList(payload.args).slice(0, 24) : [],
+          promptMode: payload.promptMode === 'arg' ? 'arg' : 'stdin',
+          mcpSupport: payload.mcpSupport === 'none' ? 'none' : 'mcp-config',
+          models,
+          model: models[0] || '',
+          apiKey: rawKey
+        };
+
+        let capabilities;
+        if (transport === 'mcp-relay') {
+          capabilities = providerCapabilities.normalizeCapabilities({
+            chat: true,
+            workflow: true,
+            workbench: Boolean(meta.viaMcp),
+            vision: false,
+            maxConcurrency: 1,
+            mode: 'probed',
+            checkedAt: Date.now(),
+            checks: {
+              chat: '源 Agent 已通过自主配对接入在线接力通道',
+              workflow: 'MCP 在线接力按串行任务队列执行（并发上限 1）',
+              workbench: meta.viaMcp ? '同一 MCP 会话已暴露 workbench_action 工作台工具' : '未走持久 MCP 会话，无法操作工作台',
+              vision: '外部通道默认仅按文本处理'
+            }
+          }, candidate);
+        } else {
+          const probeRes = await externalAgent.probeCapabilities(candidate, { timeoutMs: 25000 }).catch(err => ({
+            ok: false,
+            error: err.message,
+            capabilities: providerCapabilities.defaultCapabilities(candidate)
+          }));
+          capabilities = probeRes.capabilities;
+        }
+
+        const savedDoc = await serializeProviderWrite(async () => {
+          const old = await readProviderConfig();
+          const profiles = providerProfiles(old).map(x => ({ ...x }));
+          const idx = profiles.findIndex(x => x.id === id);
+          const prev = idx >= 0 ? profiles[idx] : {};
+          let apiKeyEncrypted = prev.apiKeyEncrypted || '';
+          if (rawKey) {
+            if (!safeStorage.isEncryptionAvailable()) throw new Error('系统安全存储不可用，无法安全保存 Token');
+            apiKeyEncrypted = safeStorage.encryptString(rawKey).toString('base64');
+          }
+          const record = {
+            ...prev,
+            id,
+            name: candidate.name,
+            kind: candidate.kind,
+            agentTransport: candidate.agentTransport,
+            provider: candidate.provider,
+            baseUrl: candidate.baseUrl,
+            command: candidate.command,
+            args: candidate.args,
+            promptMode: candidate.promptMode,
+            mcpSupport: candidate.mcpSupport,
+            capabilities,
+            models: candidate.models,
+            model: candidate.model,
+            modelMetadata: prev.modelMetadata || {},
+            modelLimits: prev.modelLimits || {},
+            modelEfforts: prev.modelEfforts || {},
+            apiKeyEncrypted
+          };
+          if (idx >= 0) profiles[idx] = record; else profiles.push(record);
+          const hasExistingModel = Boolean(profiles.find(p => p.id === old.activeProfileId)?.model);
+          const nextActiveId = payload.makeActive === true || !hasExistingModel ? id : (old.activeProfileId || id);
+          const document = { schema: 2, activeProfileId: String(nextActiveId), profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
+          await storeProviderConfig(document);
+          return document;
+        });
+
+        const pub = publicConfig(savedDoc);
+        for (const win of BrowserWindow.getAllWindows()) {
+          if (!win.isDestroyed()) {
+            win.webContents.send('provider:updated', {
+              config: pub,
+              addedProfileId: id,
+              name: candidate.name,
+              agentTransport: transport,
+              capabilities,
+              workbenchAvailable: Boolean(capabilities?.workbench),
+              viaMcp: Boolean(meta.viaMcp)
+            });
+          }
+        }
+        return { profileId: id, name: candidate.name, agentTransport: transport, capabilities };
+      }
+    });
+    return pairingServer;
+  }
+  ipcMain.handle('provider:pairing-start', async (event, input = {}) => {
+    try {
+      checkShell(event);
+      const info = await getPairingServer().startSession({ rotateToken: input?.rotateToken === true });
+      return { ok: true, ...info };
+    } catch (error) { return { ok: false, error: agentRecovery.redact(error.message) }; }
+  });
+  ipcMain.handle('provider:pairing-status', async (event) => {
+    try {
+      checkShell(event);
+      const info = pairingServer ? pairingServer.getInfo() : { started: false, state: { status: 'idle' } };
+      return { ok: true, ...info };
+    } catch (error) { return { ok: false, error: agentRecovery.redact(error.message) }; }
+  });
+  ipcMain.handle('provider:open-connect-dir', async (event) => {
+    try {
+      checkShell(event);
+      const info = await getPairingServer().startSession({ rotateToken: false });
+      const err = info.bundleDir ? await shell.openPath(info.bundleDir) : '目录未初始化';
+      return err ? { ok: false, error: err } : { ok: true, path: info.bundleDir };
+    } catch (error) { return { ok: false, error: error.message }; }
   });
   ipcMain.handle('provider:parse-agent-import', async (event, input = {}) => {
     try {
@@ -1415,8 +1607,10 @@ if(primaryInstance)app.whenReady().then(() => {
           cwd: agentWorkspace,
           thinking: cfg.effort || 'off',
           approval: input.context?.policies?.approval === 'full' ? 'full' : 'ask',
+          mode: reqMode,
           timeoutMs: 300000,
           signal: controller.signal,
+          relayDispatch: (pid, req) => getPairingServer().dispatchRelayTask(pid, req),
           onDelta: delta => {
             if (activeRun !== run || run.cancelled) return;
             broadcastAgent({ type: 'message_update', assistantMessageEvent: { type: 'text_delta', delta }, runId: run.id, taskId: run.taskId, cwd: agentWorkspace });
@@ -1563,6 +1757,7 @@ if(primaryInstance)app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   Menu.setApplicationMenu(null);
   createWindow();
+  setTimeout(() => { void getPairingServer().startSession({ rotateToken: false }).catch(() => {}); }, 200);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
@@ -1575,5 +1770,5 @@ let shutdownStarted=false;
 app.on('before-quit', event => {
   if(shutdownStarted)return;
   event.preventDefault();shutdownStarted=true;
-  Promise.allSettled([stopPiClient(),workbenchWorkers.dispose()]).finally(()=>app.quit());
+  Promise.allSettled([stopPiClient(),workbenchWorkers.dispose(),pairingServer?.close()]).finally(()=>app.quit());
 });
