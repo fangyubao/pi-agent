@@ -160,11 +160,54 @@
   function fileData(file,mode){return new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result);reader.onerror=()=>reject(new Error('读取附件失败：'+file.name));mode==='text'?reader.readAsText(file):reader.readAsDataURL(file);});}
   async function addAttachments(files){const c=current();if(!c)return;const list=attachmentList(c.task.id);const textExt=/\.(txt|md|json|csv|tsv|js|cjs|mjs|ts|tsx|jsx|html|css|xml|yaml|yml|py|java|c|cc|cpp|h|hpp|rs|go|sql|log)$/i;for(const file of [...files]){if(list.length>=6){notify('每轮最多添加 6 个附件');break;}const image=/^image\/(png|jpeg|webp|gif)$/i.test(file.type);const text=file.type.startsWith('text/')||file.type==='application/json'||textExt.test(file.name);if(!image&&!text){notify('暂时支持 PNG/JPEG/WebP/GIF 和文本、代码文件');continue;}const limit=image?5*1024*1024:500*1024;if(file.size>limit){notify(file.name+' 超过 '+(image?'5 MB':'500 KB')+' 限制');continue;}try{const raw=await fileData(file,text?'text':'data');list.push({id:uid(),name:file.name,kind:text?'text':'image',mimeType:file.type||(text?'text/plain':'image/png'),size:file.size,data:text?String(raw):String(raw).split(',')[1]});}catch(error){notify(error.message);}}renderChat();}
   function removeAttachment(id){const list=attachmentList();const index=list.findIndex(x=>x.id===id);if(index>=0){list.splice(index,1);renderChat();}}
-  function modelOptions(){const current=providerRuntime.config;const profiles=(current.profiles||[]).length?current.profiles:[current];const lead='<option value="" disabled '+(current.model?'':'selected')+'>'+(providerRuntime.loading?'正在加载模型…':profiles.some(p=>(p.models||[]).length)?'选择 API / 模型':'尚未配置模型')+'</option>';const groups=profiles.map(p=>{const models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])].slice(0,4);return models.length?'<optgroup label="'+esc(p.name||p.provider)+'">'+models.map(x=>'<option value="'+esc(p.id)+'::'+esc(x)+'" '+(p.id===current.profileId&&x===current.model?'selected':'')+'>'+esc(x)+'</option>').join('')+'</optgroup>':'';}).join('');return lead+groups+'<option disabled>────────</option><option value="__settings__">模型设置…</option>';}
-  async function loadProviderCatalog(refresh=true){if(providerRuntime.loading)return;providerRuntime.loading=true;try{const config=await window.PiProviderManager.getConfig();providerRuntime.config={...providerRuntime.config,...config};providerRuntime.error='';if(refresh&&(config.hasApiKey||config.provider==='ollama')){const result=await window.PiProviderManager.listModels(config);if(result.ok){providerRuntime.availableModels=result.models||[];providerRuntime.models=(config.models||[]).slice(0,4);}else providerRuntime.error=result.error||'模型列表获取失败';}}catch(error){providerRuntime.error=error.message;}finally{providerRuntime.loading=false;updateAgentChrome();if(route==='chat')render();}}
-  async function chooseModel(value){if(agentStream){notify('当前轮运行中，请先停止再切换模型');renderChat();return;}if(!value||value==='__settings__'){navigate('settings');return;}const [profileId,...parts]=String(value).split('::'),model=parts.join('::');try{const result=await window.PiProviderManager.saveConfig({profileId,model,makeActive:true});providerRuntime.config={...providerRuntime.config,...(result.config||{}),profileId,model};await window.piDesktop?.agent?.stop?.();updateAgentChrome();render();notify('已切换 API / 模型：'+model);}catch(error){notify('模型切换失败：'+error.message);}}
-  function providerOptions(){const c=providerRuntime.config;return (c.profiles||[]).map(p=>'<option value="'+esc(p.id)+'" '+(p.id===c.profileId?'selected':'')+'>'+esc(p.name)+'</option>').join('')||'<option value="">配置 API…</option>';}
-  async function chooseProfile(id){if(agentStream){notify('请先停止当前运行再切换 API');renderChat();return;}if(!id){navigate('settings');return;}try{const result=await window.piDesktop.provider.activate(id);if(!result.ok)throw new Error(result.error);providerRuntime.config=result.config;await window.piDesktop.agent.stop();updateAgentChrome();render();notify('已切换 API：'+result.config.name);}catch(error){notify(error.message);}}
+  function currentCapabilityMode(c=current()){
+    if(c?.task&&active&&active.taskId===c.task.id&&active.id!=='workflow')return 'workbench';
+    if(c?.task&&window.PiWorkbenchLibrary.isWorkbenchTask(c.task))return 'workbench';
+    if(workflowEnabled(c))return 'workflow';
+    return 'chat';
+  }
+  function compatibleProfiles(c=current()){
+    const config=providerRuntime.config||{};
+    const all=(config.profiles||[]).length?config.profiles:(config.provider?[config]:[]);
+    const cap=window.PiProviderCapabilities;
+    return cap?cap.filterProfilesForMode(all,currentCapabilityMode(c)):all;
+  }
+  function refreshComposerProviders(c=current()){
+    const pSel=$('#composer-provider'),mSel=$('#composer-model');
+    if(pSel)pSel.innerHTML=providerOptions(c);
+    if(mSel)mSel.innerHTML=modelOptions(c);
+    const capEl=$('.composer-caption');
+    if(capEl&&composerOn('caption'))capEl.textContent=providerRuntime.config.model?'当前模型 '+providerRuntime.config.model+' · 动态上下文按需载入':'请在设置中填写 API，模型列表会自动载入';
+  }
+  let switchingProfilePromise=null;
+  async function syncProfileForMode(c=current(),{silent=false}={}){
+    const cap=window.PiProviderCapabilities;if(!cap||agentStream)return {ok:true};
+    const cfg=providerRuntime.config||{};
+    const all=(cfg.profiles||[]).length?cfg.profiles:(cfg.provider?[cfg]:[]);
+    if(!all.length)return {ok:true};
+    const mode=currentCapabilityMode(c);
+    const activeProfile=all.find(p=>p.id===cfg.profileId)||all[0];
+    if(activeProfile&&cap.supportsMode(activeProfile,mode))return {ok:true,profile:activeProfile};
+    const fallback=cap.pickCompatibleProfile(all,mode);
+    if(!fallback)return {ok:false,mode,missing:true};
+    if(switchingProfilePromise)return switchingProfilePromise;
+    switchingProfilePromise=(async()=>{
+      try{
+        const r=await window.piDesktop?.provider?.activate?.(fallback.id);
+        if(r?.ok&&r.config)providerRuntime.config=r.config;
+        else providerRuntime.config={...cfg,...fallback,profileId:fallback.id,activeProfileId:fallback.id};
+        if(!silent){const label=mode==='workbench'?'工作台':mode==='workflow'?'工作流':'基础对话';notify(`当前${label}模式不支持「${activeProfile?.name||'原配置'}」，已自动切换为「${fallback.name}」`);}
+        if(route==='chat'){updateAgentChrome();refreshComposerProviders(c);}
+        return {ok:true,profile:fallback,switched:true};
+      }finally{switchingProfilePromise=null;}
+    })();
+    return switchingProfilePromise;
+  }
+  function modelOptions(c=current()){const currentCfg=providerRuntime.config;const profiles=compatibleProfiles(c);const lead='<option value="" disabled '+(currentCfg.model?'':'selected')+'>'+(providerRuntime.loading?'正在加载模型…':profiles.some(p=>(p.models||[]).length)?'选择 API / 模型':(providerRuntime.config.profiles?.length?'当前模式无兼容模型':'尚未配置模型'))+'</option>';const groups=profiles.map(p=>{const models=[...new Set([...(p.models||[]),...(p.model?[p.model]:[])])].slice(0,4);return models.length?'<optgroup label="'+esc(p.name||p.provider)+'">'+models.map(x=>'<option value="'+esc(p.id)+'::'+esc(x)+'" '+(p.id===currentCfg.profileId&&x===currentCfg.model?'selected':'')+'>'+esc(x)+'</option>').join('')+'</optgroup>':'';}).join('');return lead+groups+'<option disabled>────────</option><option value="__settings__">模型设置…</option>';}
+  async function loadProviderCatalog(refresh=true){if(providerRuntime.loading)return;providerRuntime.loading=true;try{const config=await window.PiProviderManager.getConfig();providerRuntime.config={...providerRuntime.config,...config};providerRuntime.error='';await syncProfileForMode(current(),{silent:true});if(refresh&&(config.hasApiKey||config.provider==='ollama')){const result=await window.PiProviderManager.listModels(config);if(result.ok){providerRuntime.availableModels=result.models||[];providerRuntime.models=(config.models||[]).slice(0,4);}else providerRuntime.error=result.error||'模型列表获取失败';}}catch(error){providerRuntime.error=error.message;}finally{providerRuntime.loading=false;updateAgentChrome();if(route==='chat')render();}}
+  async function chooseModel(value){if(agentStream){notify('当前轮运行中，请先停止再切换模型');renderChat();return;}if(!value||value==='__settings__'){navigate('settings');return;}const [profileId,...parts]=String(value).split('::'),model=parts.join('::');try{const prevName=providerRuntime.config.name;const result=await window.PiProviderManager.saveConfig({profileId,model,makeActive:true});providerRuntime.config={...providerRuntime.config,...(result.config||{}),profileId,model};await window.piDesktop?.agent?.stop?.();updateAgentChrome();render();const hasHistory=Boolean(current()?.task?.messages?.some(m=>m.text));notify('已切换 API / 模型：'+model+(hasHistory&&prevName?'（将自动继承当前上下文）':''));}catch(error){notify('模型切换失败：'+error.message);}}
+  function providerOptions(c=current()){const cfg=providerRuntime.config;const profiles=compatibleProfiles(c);if(!profiles.length)return '<option value="">'+(cfg.profiles?.length?'当前模式无兼容配置…':'配置 API…')+'</option>';return profiles.map(p=>'<option value="'+esc(p.id)+'" '+(p.id===cfg.profileId?'selected':'')+'>'+esc(p.name)+'</option>').join('');}
+  async function chooseProfile(id){if(agentStream){notify('请先停止当前运行再切换 API');renderChat();return;}if(!id){navigate('settings');return;}try{const result=await window.piDesktop.provider.activate(id);if(!result.ok)throw new Error(result.error);providerRuntime.config=result.config;await window.piDesktop.agent.stop();updateAgentChrome();render();const hasHistory=Boolean(current()?.task?.messages?.some(m=>m.text));notify('已切换引擎：'+result.config.name+(hasHistory?'（将自动继承当前上下文）':''));}catch(error){notify(error.message);}}
   function effortOptions(){return [['off','默认强度'],['minimal','最小推理'],['low','低强度'],['medium','中强度'],['high','高强度']].map(([value,label])=>'<option value="'+value+'" '+((providerRuntime.config.effort||'off')===value?'selected':'')+'>'+label+'</option>').join('');}
   async function chooseEffort(effort){if(agentStream){notify('请先停止当前运行');renderChat();return;}const c=providerRuntime.config;try{const result=await window.PiProviderManager.saveConfig({profileId:c.profileId,model:c.model,effort});providerRuntime.config=result.config;await window.piDesktop.agent.stop();renderChat();}catch(error){notify(error.message);}}
   function setApproval(mode){if(agentStream){notify('请先暂停 Agent 再修改批准模式');renderChat();return;}state.settings.approval=mode==='full'?'full':'ask';save();void window.piDesktop?.agent?.stop?.();render();notify(state.settings.approval==='full'?'已开启完全批准':'修改操作将请求批准');}
@@ -1068,6 +1111,7 @@
       else if(modeMarkup){const attach=tools.querySelector('.attach-button');if(attach)attach.insertAdjacentHTML('afterend',modeMarkup);else tools.insertAdjacentHTML('afterbegin',modeMarkup);}
       if(workbenchTask)$('#task-mode')?.remove();
     }
+    refreshComposerProviders(c);
     $('#message-input').placeholder=active?.id==='circuit'?'试试：搭建 Bell 态，然后运行模拟…':active?.id==='qubo'?'试试：求解当前矩阵，或读取结果…':'描述你想做的事…';
     updateContextCapacity();
   }
@@ -1147,6 +1191,7 @@
     const wantWorkflow=mode==='workflow';
     if(Boolean(c.task.workflowOn)===wantWorkflow)return;
     c.task.workflowOn=wantWorkflow;save();
+    await syncProfileForMode(c);
     if(wantWorkflow){await openWorkflowCanvas(c);notify('已切换到工作流模式：复杂问题会先拆成小任务');}
     else{if(c.task.workbenchSession?.asMode)c.task.workbenchSession.open=false;if(active?.id==='workflow'&&active.taskId===c.task.id)closeWorkbench(false);else await window.PiContextManager?.deactivate?.();notify('已切换到基础模式（已有的工作流保留）');}
     render();
@@ -1190,8 +1235,9 @@
   async function sendWithWorkflow(input,c){
     if(!workflowEnabled(c))return sendToPi(input,c);
     await workbenchContextReady;await Promise.allSettled([...workbenchJobs.values()]);
+    const compat=await syncProfileForMode(c);if(!compat.ok){notify('当前工作流模式没有兼容的 API 或 Agent，请先在设置中配置或检测');return 'blocked';}
     const cfg=await window.PiProviderManager.getConfig();providerRuntime.config={...providerRuntime.config,...cfg};if(!cfg.model)return false;
-    const item=addMessage('assistant','',{model:cfg.model},c);transcript.start(item);
+    const item=addMessage('assistant','',{model:cfg.model,profileId:cfg.profileId,profileName:cfg.name},c);transcript.start(item);
     const run={taskId:c.task.id,messageId:item.id,planning:true};agentStream=run;
     item.run.label='正在搭建工作流…';startDurationTicker();refreshRunOwner(c.task.id);renderSidebar();
     let plan=null;
@@ -1244,7 +1290,7 @@
     const agents=[...new Set(written.map(n=>n.agent).filter(Boolean))];
     return {count:written.length,brief:written.slice(0,6).map(n=>n.id+' '+n.title).join('、')+(written.length>6?'…':'')+(agents.length?'；子智能体：'+agents.join('、'):'')};
   }
-  function navigate(r){if(route==='chat')window.PiChatHistory.capture();route=r;closeMenus();render();}
+  function navigate(r){if(route==='chat')window.PiChatHistory.capture();route=r;closeMenus();render();if(r==='chat')void syncProfileForMode(current(),{silent:true});}
   function addMessage(role,text,meta={},c=current()){if(!c)return null;const item={id:uid(),role,text,time:Date.now(),...meta};c.task.messages.push(item);c.task.updated=Date.now();window.PiChatHistory.latest(c.task);save({defer:true,taskId:c.task.id,messageId:item.id,taskFields:['updated','draft']});return item;}
   async function copyMessage(id){const m=current()?.task.messages.find(x=>x.id===id);if(!m)return;try{const value=transcript?transcript.copyText(m):m.text||'';if(window.piDesktop?.clipboard?.writeText)await window.piDesktop.clipboard.writeText(value);else await navigator.clipboard.writeText(value);notify('已复制到剪贴板');}catch{notify('复制失败，请检查系统剪贴板权限');}}
   function editMessage(id){if(agentStream){notify('请先停止当前运行，再编辑历史消息');return;}const t=current()?.task,m=t?.messages.find(x=>x.id===id&&x.role==='user');if(!m)return;t.editingMessageId=id;t.editDraft=m.text;renderChat();const box=$('#edit-input');if(box){box.focus();box.setSelectionRange(box.value.length,box.value.length);fitEditBox(box);box.scrollIntoView({block:'nearest'});}}
@@ -1284,8 +1330,13 @@
   function findAgentMessage(){if(!agentStream)return null;const c=located(agentStream.taskId);return c?.task.messages.find(x=>x.id===agentStream.messageId)||null;}
   async function sendToPi(input,c,attachments=[],options={}){await workbenchContextReady;await Promise.allSettled([...workbenchJobs.values()]);return sendToPiNow(input,c,attachments,options);}
   async function sendToPiNow(input,c,attachments=[],options={}){
+    const compat=await syncProfileForMode(c);if(!compat.ok){notify('当前模式没有兼容的 API 或 Agent，请先在设置 → LLM 中配置或检测');return 'blocked';}
     const cfg=await window.PiProviderManager.getConfig();providerRuntime.config={...providerRuntime.config,...cfg};if(!cfg.model)return false;
-    const item=options.reuseMessage||addMessage('assistant','',{model:cfg.model},c);
+    const over=window.PiContextInspector?.overrides(c.task)||{};
+    const prevEngine=c.task.lastAgentEngine||[...c.task.messages].reverse().find(m=>m.role==='assistant'&&m.text&&(m.profileId||m.model));
+    const switchedEngine=Boolean(prevEngine&&((prevEngine.profileId&&cfg.profileId&&prevEngine.profileId!==cfg.profileId)||(prevEngine.model&&cfg.model&&prevEngine.model!==cfg.model)));
+    const item=options.reuseMessage||addMessage('assistant','',{model:cfg.model,profileId:cfg.profileId,profileName:cfg.name},c);
+    if(options.reuseMessage){item.model=cfg.model;item.profileId=cfg.profileId;item.profileName=cfg.name;}
     if(!options.reuseMessage)transcript.start(item);else item.run.label='正在连接 Agent…';
     agentStream={taskId:c.task.id,messageId:item.id};
     if(options.designAttempt){designFlow.attach(c.task.design,options.designAttempt,item.id);item.run.designAttempt=options.designAttempt;}
@@ -1296,10 +1347,35 @@
     const fail=error=>{if(agentStream!==run)return;item.run.error=String(error);transcript.finish(item,'error');settleDesign(c,item);agentStream=null;agentUiRequest=null;disarmAutoChoose();stopDurationTicker();save({defer:true,taskId:c.task.id,messageId:item.id});void window.PiPersistence.flush().catch(error=>notify(error.message));refreshRunOwner(c.task.id);renderSidebar();syncDesign(c);};
     try{
       const payload=buildContextPayload(c,input,attachments);
-      const result=await window.piDesktop.agent.send({runId:item.id,message:payload.message,attachments:payload.attachments,context:payload.envelope,config:{profileId:cfg.profileId,provider:cfg.provider,baseUrl:cfg.baseUrl,model:cfg.model}});
+      let handoffPrompt='';
+      let nextHandoffSeq=Number(c.task.handoffSeq)||0;
+      if(switchedEngine){
+        nextHandoffSeq+=1;
+        const excludeRecent=Boolean(c.task.context?.cleanStart)||(over.excluded||[]).includes('conversation:recent');
+        const rawHist=excludeRecent?[]:c.task.messages.filter(m=>m.id!==item.id&&m.text);
+        if(input&&rawHist.at(-1)?.role==='user'&&rawHist.at(-1).text===input)rawHist.pop();
+        handoffPrompt=window.PiProviderCapabilities?.buildHandoffPrompt?.({
+          taskName:c.task.name,
+          projectName:c.project.name,
+          goal:over.goal||'',
+          notes:over.notes||'',
+          messages:rawHist,
+          memoryItems:payload.memory?.items||[],
+          workbenchState:payload.workbenchState,
+          toolHistory:recentToolHistory(c.task),
+          fromModel:[prevEngine.profileName||prevEngine.name,prevEngine.model].filter(Boolean).join(' / '),
+          toModel:[cfg.name,cfg.model].filter(Boolean).join(' / ')
+        })||'';
+      }
+      const result=await window.piDesktop.agent.send({runId:item.id,message:payload.message,attachments:payload.attachments,context:payload.envelope,handoffPrompt,handoffSeq:nextHandoffSeq,config:{profileId:cfg.profileId,provider:cfg.provider,baseUrl:cfg.baseUrl,model:cfg.model}});
       if(result.recovering)notify('Pi Agent 未完成首轮请求，已进入自动诊断与恢复；最多重试 2 次');
       if(result.recovered){item.run.recovered=true;notify('Pi Agent 连接已恢复，已继续本轮请求');}
-      if(result.ok&&c.task.context?.cleanStart){c.task.context.cleanStart=false;save();}
+      if(result.ok){
+        if(c.task.context?.cleanStart)c.task.context.cleanStart=false;
+        c.task.lastAgentEngine={profileId:cfg.profileId,profileName:cfg.name,provider:cfg.provider,model:cfg.model};
+        if(switchedEngine)c.task.handoffSeq=nextHandoffSeq;
+        save({defer:true,taskId:c.task.id,taskFields:['lastAgentEngine','handoffSeq','context']});
+      }
       if(!result.ok)fail(result.error);return true;
     }catch(error){fail(error.message);return true;}
   }
@@ -1352,7 +1428,7 @@
     return submitAgentUi(q,response);
   }
 
-  async function send(raw){const input=raw.trim(),c=current();if(!c)return;if(agentUiRequest?.taskId===c.task.id&&['select','input','editor'].includes(agentUiRequest.method)){if(!input)return;const q=agentUiRequest;if(await submitAgentUi(q,{value:input})){c.task.draft='';save();if(route==='chat')renderChat();}return;}if(agentStream||designDispatchBusy)return;const attachments=[...attachmentList(c.task.id)];if(!input&&!attachments.length)return;if(c.task.pending){if(!input){notify('请先回答当前需求确认');return;}const q=input.toLowerCase();resolveQuestion(q.includes('bell')?'bell':q.includes('ghz')?'ghz':'custom',input);return;}c.task.draft='';pendingAttachments.set(c.task.id,[]);addMessage('user',input,{attachments:attachmentMeta(attachments)});if(window.piDesktop?.agent){try{if(workflowEnabled(c)&&!attachments.length&&window.piDesktop?.workflow){if(await sendWithWorkflow(input,c))return;}else if(await sendToPi(input,c,attachments))return;}catch(e){addMessage('assistant','Pi Agent 连接失败：'+e.message);save();renderChat();renderSidebar();return;}}const lower=input.toLowerCase();try{if(attachments.length&&!input)addMessage('assistant','尚未配置模型，本轮附件未发送。请选择模型后重新添加附件。');else if(/确认|不确定|选项/.test(input)){ask();return;}else if(active?.id==='circuit'&&/bell|ghz/.test(lower)){const kind=lower.includes('ghz')?'ghz':'bell';active.controller.invoke('preset',{kind});let r='已在右侧搭建 '+kind.toUpperCase()+' 电路。';if(/运行|模拟/.test(input))r+='\\n'+active.controller.invoke('run',{});addMessage('assistant',r);}else if(active&&/求解|运行|模拟/.test(input))addMessage('assistant',active.controller.invoke('run',{}));else if(active&&/读取|查看|当前|数据|结果/.test(input))addMessage('assistant',active.controller.summary());else if(window.PiWorkbenchPlugins.context&&/上下文/.test(input))addMessage('assistant',window.PiWorkbenchPlugins.context.read(c));else addMessage('assistant','尚未配置模型，当前仅可使用本地功能。请到“设置”中填写 API 并选择模型后，聊天会切换到真实 Pi Agent。');}catch(e){addMessage('assistant','操作未完成：'+e.message);}save();renderChat();renderSidebar();}
+  async function send(raw){const input=raw.trim(),c=current();if(!c)return;if(agentUiRequest?.taskId===c.task.id&&['select','input','editor'].includes(agentUiRequest.method)){if(!input)return;const q=agentUiRequest;if(await submitAgentUi(q,{value:input})){c.task.draft='';save();if(route==='chat')renderChat();}return;}if(agentStream||designDispatchBusy)return;const attachments=[...attachmentList(c.task.id)];if(!input&&!attachments.length)return;if(c.task.pending){if(!input){notify('请先回答当前需求确认');return;}const q=input.toLowerCase();resolveQuestion(q.includes('bell')?'bell':q.includes('ghz')?'ghz':'custom',input);return;}c.task.draft='';pendingAttachments.set(c.task.id,[]);addMessage('user',input,{attachments:attachmentMeta(attachments)});if(window.piDesktop?.agent){try{if(workflowEnabled(c)&&!attachments.length&&window.piDesktop?.workflow){const wfRes=await sendWithWorkflow(input,c);if(wfRes==='blocked'){addMessage('assistant','当前工作流模式没有兼容的模型或 Agent，请在 设置 → LLM 中启用支持工作流的配置。');save();renderChat();renderSidebar();return;}if(wfRes)return;}else{const piRes=await sendToPi(input,c,attachments);if(piRes==='blocked'){addMessage('assistant','当前工作台模式没有兼容工作台工具的模型或 Agent，请在 设置 → LLM 中选择或检测支持工作台的配置。');save();renderChat();renderSidebar();return;}if(piRes)return;}}catch(e){addMessage('assistant','Pi Agent 连接失败：'+e.message);save();renderChat();renderSidebar();return;}}const lower=input.toLowerCase();try{if(attachments.length&&!input)addMessage('assistant','尚未配置模型，本轮附件未发送。请选择模型后重新添加附件。');else if(/确认|不确定|选项/.test(input)){ask();return;}else if(active?.id==='circuit'&&/bell|ghz/.test(lower)){const kind=lower.includes('ghz')?'ghz':'bell';active.controller.invoke('preset',{kind});let r='已在右侧搭建 '+kind.toUpperCase()+' 电路。';if(/运行|模拟/.test(input))r+='\\n'+active.controller.invoke('run',{});addMessage('assistant',r);}else if(active&&/求解|运行|模拟/.test(input))addMessage('assistant',active.controller.invoke('run',{}));else if(active&&/读取|查看|当前|数据|结果/.test(input))addMessage('assistant',active.controller.summary());else if(window.PiWorkbenchPlugins.context&&/上下文/.test(input))addMessage('assistant',window.PiWorkbenchPlugins.context.read(c));else addMessage('assistant','尚未配置模型，当前仅可使用本地功能。请到“设置”中填写 API 并选择模型后，聊天会切换到真实 Pi Agent。');}catch(e){addMessage('assistant','操作未完成：'+e.message);}save();renderChat();renderSidebar();}
   function dialog(title,body,onSubmit,submit='确认'){$('#dialog').classList.remove('file-review-dialog');$('#dialog-title').textContent=title;$('#dialog-body').innerHTML=body;$('#dialog-form button[type="submit"]').textContent=submit;dialogSubmit=onSubmit;$('#dialog').showModal();$('#dialog').querySelector('input,select')?.focus();}
   function nameDialog(title,value,fn){dialog(title,'<label class="dialog-label" for="entity-name">名称</label><input class="dialog-input" id="entity-name" name="name" value="'+esc(value)+'" required maxlength="50" autocomplete="off">',f=>{const n=String(f.get('name')||'').trim();if(!n)throw new Error('名称不能为空');fn(n);});}
   function addProject(){nameDialog('新建项目','',name=>{state.projects.push({id:uid(),name,pinned:false,expanded:true,tasks:[]});save();render();});}
@@ -1476,7 +1552,7 @@
     wfFileTimers.set(t.id,setTimeout(async()=>{wfFileTimers.delete(t.id);const r=await window.piDesktop?.workflow?.saveFiles?.({root:t.workspacePath,state:structuredClone(t.workbenches.workflow)}).catch(e=>({ok:false,error:e.message}));if(r&&!r.ok)notify('工作流文件没能保存：'+r.error);},700));
   }
 
-  function selectTask(id){const f=located(id);if(!f)return;const switching=state.activeTask!==id;window.PiChatHistory.capture();if(switching&&(active||trialSession))closeWorkbench(false,{suspend:true});state.activeTask=id;f.project.expanded=true;save({defer:true,metaOnly:true});navigate('chat');if(switching){syncModeContext();restoreTaskWorkbench();}}
+  function selectTask(id){const f=located(id);if(!f)return;const switching=state.activeTask!==id;window.PiChatHistory.capture();if(switching&&(active||trialSession))closeWorkbench(false,{suspend:true});state.activeTask=id;f.project.expanded=true;save({defer:true,metaOnly:true});navigate('chat');if(switching){syncModeContext();restoreTaskWorkbench();void syncProfileForMode(current(),{silent:true});}}
   function restoreTaskWorkbench(){const c=current(),info=workbenchInfo(c);if(!c||active||!info?.open)return;if(info.sourcePath)void openPublishedWorkbench(c,info);else openWorkbench(info.key,info.mode,info.target,true,Boolean(workflowEnabled(c)&&info.key==='workflow'));}
   // 任务切换后，按“新任务”的模式重新决定 Agent 的上下文（closeWorkbench 发生在切换之前，读到的是旧任务）。
   function syncModeContext(){workbenchContextReady=workbenchContextReady.catch(()=>{}).then(()=>{if(active)return;return workflowContextWanted()?window.PiContextManager?.activate?.({workbench:'workflow',plugins:state.plugins,mode:'workbench'}):window.PiContextManager?.deactivate?.();});}
@@ -1500,6 +1576,7 @@
       await workbenchContextReady;
       if(token!==mountToken||!active||active.taskId!==c.task.id)return;
       const frame=$('#module-frame');frame.hidden=false;frame.src=result.url;renderSidePanel();scope();
+      void syncProfileForMode(c);
     }catch(error){if(token===mountToken){active=null;render({preserveChat:true});notify('工作台运行失败：'+error.message);}}
   }
   function runPublishedWorkbench(taskId){const c=located(taskId),d=c?.task.design;if(!d?.publishedPath){notify('当前任务还没有已发布的工作台');return;}openUseDialog(d.publishedId||('published:'+taskId),{id:d.publishedId||('published:'+taskId),path:d.publishedPath,name:d.publishedName||d.name||c.task.name});}
@@ -1548,6 +1625,7 @@
     if(hasOpenDesignWorkbench(c))previewClosed.delete(c.task.id);
     activeSideTab=hasOpenDesignWorkbench(c)?'preview':'workbench';save({defer:true,taskId:c.task.id,taskFields:['workbenchSession','use']});
     render({preserveChat:true});
+    if(!asMode)void syncProfileForMode(c);
     const frame=$('#module-frame');frame.src='./workbenches/frame.html?key='+encodeURIComponent(key)+'&mode='+encodeURIComponent(mode)+(target?'&target='+encodeURIComponent(target):'');
     void window.piDesktop?.workbench?.manifest?.({key}).then(result=>{
       if(token!==mountToken||!active||active.id!==key||active.taskId!==c.task.id)return;
@@ -1583,7 +1661,7 @@
     if(activeSideTab==='workbench'||activeSideTab==='preview')activeSideTab=contextTabs.at(-1)?.id||memoryTabs.at(-1)?.id||null;
     $('#revision-status').textContent='';
     if(show){render({preserveChat:true});notify(current()?.task.design?'设计已收起，草稿和聊天已保留':'工作台已关闭，数据保留在任务中');}
-    else{renderSidePanel();renderDesignPanel();scope();}
+    else{refreshComposerProviders(current());renderSidePanel();renderDesignPanel();scope();}
   }
   // ---- 工作流节点运行：调度在桌面壳里（要写状态、要调主进程），画布只发“运行/停止”。
   // 模型只收到该节点的指令 + 直接上游的结论；不带聊天历史，也不带整个工作流。
@@ -1622,7 +1700,9 @@
     const nodes=wfNodes(session);if(!nodes.length)return {ok:false,error:'还没有工作流'};
     if(!window.PiWorkflowRun.layers(nodes))return {ok:false,error:'工作流有环或依赖缺失，无法运行'};
     const controller=new AbortController();wfAllRun={controller};
-    window.PiWorkflowRun.runAll(nodes,{signal:controller.signal,runNode:id=>wfRunOne(session,id),fresh:!pendingOnly})
+    const usedIds=nodes.map(n=>window.PiWorkflowRun.modelFor(n,wfData(session).agents)?.model?.profileId||providerRuntime.config?.profileId).filter(Boolean);
+    const concurrency=window.PiProviderCapabilities?.workflowConcurrencyFor?.(providerRuntime.config?.profiles||[],usedIds)||3;
+    window.PiWorkflowRun.runAll(nodes,{signal:controller.signal,runNode:id=>wfRunOne(session,id),fresh:!pendingOnly,concurrency})
       .then(r=>notify(r.cancelled?'已停止':r.failed.length?'运行结束：'+r.done+' 个完成，'+r.failed.length+' 个失败，'+r.skipped.length+' 个跳过':'工作流运行完成（'+r.done+' 个节点）'))
       .catch(e=>notify(e.message)).finally(()=>{wfAllRun=null;pushWorkflowModels();});
     return {ok:true,started:true};

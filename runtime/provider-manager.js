@@ -23,5 +23,15 @@
     if (api) return api.test(config);
     return { ok: false, error: '浏览器预览模式不发起模型请求，请在桌面应用中使用。' };
   }
-  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test });
+  async function probeCapabilities(config) {
+    const api = desktop();
+    if (api?.probeCapabilities) return api.probeCapabilities(config);
+    return { ok: false, error: '浏览器预览模式不支持能力探测，请在桌面应用中使用。' };
+  }
+  async function parseAgentImport(input) {
+    const api = desktop();
+    if (api?.parseAgentImport) return api.parseAgentImport(input);
+    return { ok: false, error: '浏览器预览模式不支持 AI 解析，请在桌面应用中使用。' };
+  }
+  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport });
 })();

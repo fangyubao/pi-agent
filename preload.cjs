@@ -59,6 +59,8 @@ contextBridge.exposeInMainWorld('piDesktop', Object.freeze({
     delete: profileId => ipcRenderer.invoke('provider:delete', { profileId }),
     listModels: config => ipcRenderer.invoke('provider:list-models', config),
     test: config => ipcRenderer.invoke('provider:test', config),
+    probeCapabilities: config => ipcRenderer.invoke('provider:probe-capabilities', config),
+    parseAgentImport: input => ipcRenderer.invoke('provider:parse-agent-import', input),
     saveTiers: tiers => ipcRenderer.invoke('provider:save-tiers', { tiers })
   }),
   clipboard: Object.freeze({ writeText: text => ipcRenderer.invoke('clipboard:write', text) }),
