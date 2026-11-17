@@ -1,0 +1,21 @@
+{
+  "protocolVersion": "1.0",
+  "id": "qubo",
+  "name": "QUBO 求解器",
+  "description": "本地矩阵建模和求解工作台。",
+  "version": "1.0.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "qubo.v1", "description": "矩阵、求解结果和修订号" },
+  "capabilities": ["local-compute", "structured-state", "semantic-events"],
+  "actions": [
+    { "name": "setCell", "access": "write", "description": "修改单个矩阵元素" },
+    { "name": "readState", "access": "read", "description": "读取当前矩阵和结果" },
+    { "name": "setMatrix", "access": "write", "description": "替换 QUBO 矩阵" },
+    { "name": "symmetrize", "access": "compute", "description": "对称化矩阵" },
+    { "name": "solve", "access": "compute", "description": "运行本地求解" },
+    { "name": "run", "access": "compute", "description": "运行本地求解" },
+    { "name": "clear", "access": "write", "description": "清空求解结果" }
+  ],
+  "events": ["matrix.updated", "solver.started", "solver.finished", "result.read", "state.cleared"]
+}

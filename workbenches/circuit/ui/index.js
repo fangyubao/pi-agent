@@ -1,0 +1,15 @@
+'use strict';
+window.PiWorkbenchModules.circuit={prompt:'读取量子电路、添加/移动/删除量子门、生成 Bell 或 GHZ 态并运行本地状态向量模拟。',mount(host,api){
+  const defaults={qubits:3,gates:[],revision:0,simulation:null,selected:'H'};
+  let data={...defaults,...api.data};
+  function preset(kind){return api.server('applyPreset',{kind});}
+  function run(){return api.server('runSimulation');}
+  function place(q,col){return api.server('addGate',{gate:data.selected||'H',qubit:q,column:col});}
+  function render(){const cols=6;host.innerHTML='<div class="module"><div class="module-summary"><div><h2>量子门电路</h2><p>拖拽搭建，或让 Agent 通过结构化动作搭建</p></div><span class="offline">● 离线运行</span></div><div class="module-toolbar"><button class="button" data-cmd="bell">Bell 态</button><button class="button" data-cmd="ghz">GHZ 态</button><button class="button" data-cmd="clear">清空电路</button></div><section class="module-card"><div class="module-section-title"><h3>电路画布</h3><small>'+data.qubits+' 个量子比特 · 选择门后点击格子</small></div><div class="circuit-scroll"><div class="circuit-grid"><span></span>'+Array.from({length:cols},(_,i)=>'<span class="time-label">t'+(i+1)+'</span>').join('')+Array.from({length:data.qubits},(_,q)=>'<span class="qubit-label">q'+q+'</span>'+Array.from({length:cols},(_,c)=>{const g=data.gates.find(x=>x.q===q&&x.col===c+1);return '<button class="gate-cell '+(g?'occupied':'')+' '+(g?.gate==='CNOT'?'target':'')+'" data-drop="'+q+','+(c+1)+'">'+(g?g.gate:'·')+'</button>';}).join('')).join('')+'</div></div></section><section class="module-card"><div class="module-section-title"><h3>门工具</h3><small>选择后放入画布</small></div><div class="gate-palette">'+['H','X','CNOT','M'].map(g=>'<button class="gate-chip '+(data.selected===g?'selected':'')+'" data-gate="'+g+'">'+g+'</button>').join('')+'</div><div class="run-row"><span class="module-note">用户操作和 Agent 操作共享同一状态</span><button class="button primary" data-cmd="run">运行模拟 '+api.icon('play')+'</button></div></section><section class="module-card"><div class="module-section-title"><h3>模拟结果</h3><small>修订 '+(data.revision||0)+'</small></div><p class="event-status">'+(data.simulation||'等待运行。')+'</p></section></div>';
+    host.querySelectorAll('[data-gate]').forEach(b=>b.addEventListener('click',()=>{void api.server('selectGate',{gate:b.dataset.gate}).catch(error=>api.notify(error.message));}));
+    host.querySelectorAll('[data-drop]').forEach(cell=>cell.addEventListener('click',()=>place(...cell.dataset.drop.split(',').map(Number))));
+    host.querySelectorAll('[data-cmd]').forEach(b=>b.addEventListener('click',()=>{if(b.dataset.cmd==='bell')preset('bell');if(b.dataset.cmd==='ghz')preset('ghz');if(b.dataset.cmd==='clear')void api.server('clearCircuit');if(b.dataset.cmd==='run')run();}));
+  }
+  render();
+  return {sync(next){data={...structuredClone(defaults),...structuredClone(next||{})};data.gates=Array.isArray(data.gates)?data.gates:[];render();},invoke(c,p={}){return api.server(c,p);},summary(){return '当前电路包含 '+data.qubits+' 个量子比特和 '+data.gates.length+' 个量子门。'+(data.simulation?'模拟已完成。':'尚未模拟。');},dispose(){}};
+}};

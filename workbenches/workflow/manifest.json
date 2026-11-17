@@ -1,0 +1,26 @@
+{
+  "protocolVersion": "1.0",
+  "id": "workflow",
+  "name": "工作流",
+  "description": "把一个问题拆成串行/并行的小任务，逐个节点查看、调整模型与提示词。",
+  "version": "0.1.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "workflow.v1", "description": "工作流计划、节点与视口" },
+  "capabilities": ["structured-state", "semantic-events"],
+  "actions": [
+    { "name": "readPlan", "access": "read", "description": "读取工作流摘要（节点标题、角色、模型、依赖），不含完整提示词" },
+    { "name": "readNode", "access": "read", "description": "读取一个节点的完整内容" },
+    { "name": "setPlan", "access": "write", "description": "整体替换工作流（拆解器产出）" },
+    { "name": "updateNode", "access": "write", "description": "修改一个节点的标题、角色、任务介绍、提示词、技能或工具" },
+    { "name": "setNodeModel", "access": "write", "description": "为节点指定模型" },
+    { "name": "addNode", "access": "write", "description": "新增一个节点" },
+    { "name": "removeNode", "access": "write", "description": "删除一个节点及其连线" },
+    { "name": "setAgentModel", "access": "write", "description": "给一个子智能体指定模型（它名下没有手选模型的节点都用它），传 null 恢复自动" },
+    { "name": "setHtmlView", "access": "write", "description": "开关：是否在工作文件夹的 workflow/ 里生成可交互的 index.html（多层级阅读视图）" },
+    { "name": "setNodeInputs", "access": "write", "description": "登记某个节点的附件元数据（由桌面壳在复制文件后调用，不要手动调用）" },
+    { "name": "setNodeRun", "access": "write", "description": "桌面壳写入节点运行结果（由运行按钮触发，不要手动调用）" },
+    { "name": "clearPlan", "access": "write", "description": "清空工作流" }
+  ],
+  "events": ["plan.updated", "node.updated"]
+}

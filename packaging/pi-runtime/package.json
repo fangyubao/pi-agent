@@ -1,0 +1,8 @@
+{
+  "name": "pi-workbench-bundled-runtime",
+  "private": true,
+  "version": "0.2.9",
+  "dependencies": {
+    "@earendil-works/pi-coding-agent": "1.5.0"
+  }
+}

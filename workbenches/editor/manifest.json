@@ -1,0 +1,16 @@
+{
+  "protocolVersion": "1.0",
+  "id": "editor",
+  "name": "工作台设计修改器",
+  "description": "修改已有工作台的名称、约束、提示词和知识库路径。",
+  "version": "1.0.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "editor.v1", "description": "工作台设计元数据和修订号" },
+  "capabilities": ["structured-state", "prompt-design"],
+  "actions": [
+    { "name": "readDesign", "access": "read" },
+    { "name": "updateDesign", "access": "write" }
+  ],
+  "events": ["design.updated"]
+}

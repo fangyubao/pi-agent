@@ -1,0 +1,16 @@
+{
+  "protocolVersion": "1.0",
+  "id": "mcu",
+  "name": "MCU 控制台",
+  "description": "本地 HTML 设计草稿和 MCU 控制台。",
+  "version": "1.0.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "mcu.v1", "description": "设计草稿、HTML 和修订号" },
+  "capabilities": ["structured-state", "html-preview"],
+  "actions": [
+    { "name": "readDraft", "access": "read" },
+    { "name": "setDraftHTML", "access": "write" }
+  ],
+  "events": ["draft.updated", "draft.previewed"]
+}

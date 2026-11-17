@@ -1,0 +1,21 @@
+{
+  "protocolVersion": "1.0",
+  "id": "builder",
+  "name": "工作台设计器",
+  "description": "通用工作台创建器；UI 与后端工程骨架分离。",
+  "version": "1.0.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "builder.v1", "description": "工作台草稿、知识库、提示词和设计阶段" },
+  "capabilities": ["structured-state", "prompt-design", "knowledge-paths", "semantic-events"],
+  "actions": [
+    { "name": "readDraft", "access": "read" },
+    { "name": "readKnowledge", "access": "read" },
+    { "name": "searchKnowledge", "access": "read" },
+    { "name": "setKnowledgePrompt", "access": "write" },
+    { "name": "applyPrompt", "access": "write" },
+    { "name": "readDesignWorkflow", "access": "read" },
+    { "name": "reportDesignStage", "access": "write" }
+  ],
+  "events": ["knowledge.imported", "prompt.updated", "prompt.applied", "design.stage.reported"]
+}

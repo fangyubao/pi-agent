@@ -1,0 +1,22 @@
+{
+  "protocolVersion": "1.0",
+  "id": "circuit",
+  "name": "量子门电路",
+  "description": "本地电路搭建和模拟工作台。",
+  "version": "1.0.0",
+  "ui": { "entry": "index.js", "style": "" },
+  "server": { "entry": "index.cjs", "runtime": "node", "external": false },
+  "state": { "schema": "circuit.v1", "description": "量子比特、电路门、连接和模拟状态" },
+  "capabilities": ["local-compute", "structured-state", "semantic-events"],
+  "actions": [
+    { "name": "readCircuit", "access": "read" },
+    { "name": "selectGate", "access": "write" },
+    { "name": "addGate", "access": "write" },
+    { "name": "removeGate", "access": "write" },
+    { "name": "clearCircuit", "access": "write" },
+    { "name": "runSimulation", "access": "compute" },
+    { "name": "applyPreset", "access": "write" },
+    { "name": "preset", "access": "write" }
+  ],
+  "events": ["gate.selected", "gate.placed", "gate.removed", "circuit.cleared", "simulation.finished", "preset.applied"]
+}

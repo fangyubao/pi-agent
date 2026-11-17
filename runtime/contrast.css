@@ -1,0 +1,74 @@
+/* Contrast + minimum font-size overrides. Loaded LAST so it wins over earlier sheets.
+   Secondary text #566170 (~6.5:1 on white), tertiary #667080 (~5.2:1). Delete this file
+   and its <link> in index.html to revert every change. */
+
+/* 次要文字：说明、标签、时间 */
+.navigation kbd,.sidebar-foot small,.welcome-foot,.message-label,.composer-caption,.page-note,
+.plugin-status,.search-result small,.empty-state,.choice small,.question-actions small,
+.workbench-footer,.app-status,.module-section-title small,.module-note,.metric small,
+.agent-status small,.agent-io,.agent-steps li,.agent-event,.design-dock-heading small,
+.design-history li time,.first-launch-steps small,.workbench-audit-list span,
+.run-indicator,.run-summary,.run-indicator time,.run-summary time,.graph-node small,
+.environment-status,.run-controls,.tool-state,.message-controls button,.editing-banner button,
+.design-confirm-card header span,.composer-context,.eyebrow,.tag,.help-close,.submenu-arrow,
+.project-toggle .icon:first-child,.agent-io code,.matrix-labels,.results-table th,
+.qubit-label,.time-label,.prob-row,.diff-line>span { color:#566170; }
+.first-launch-note { color:#566170!important; }
+
+.memory-kicker,.memory-page-head p,.memory-count,.memory-empty p,.memory-list-heading span,
+.memory-card-head small,.memory-card-footer,.memory-editor-note,.memory-empty,
+.memory-history-view small,.memory-version small,.side-panel-tab-close,.side-panel-tab-new,
+.context-kicker,.context-page-head p,.context-revision small,.context-tab,
+.context-capacity-card p,.context-summary-grid small,.context-section-card header span,
+.context-goal-preview small,.context-trust,.context-check,.context-block-meta,
+.audit-banner span,.audit-item p,.audit-empty,.context-empty,.context-history-item time,
+.context-history-item p,.context-preview p,.context-setting-row p,
+.composer-palette-head span,.composer-palette-description,.composer-palette-badge,
+.composer-palette-foot,.command-timeline time,.local-label { color:#566170; }
+.memory-generate p { color:#5f5675; }
+
+#design-panel .design-region-note,#design-panel .history-entry-heading time,
+#design-panel .history-copy p,.shell.has-design-panel .task-workbench-toggle small { color:#566170; }
+#design-panel .stage-card { color:#4f5f78; }
+
+/* 暖色与错误色：保持色相，加深到可读 */
+.question-tabs .status,.memory-expiry,.context-block-card>small { color:#7a5d1f; }
+.agent-status.waiting,.context-capacity-button.warning,.audit-banner.warning { color:#7a5a14; }
+.memory-reason,.run-metrics-estimate { color:#6f5522; }
+.agent-result time { color:#2f6b45; }
+.tool-failure-previews,.design-failure,.audit-banner.contaminated { color:#8f2f2f; }
+.tool-failure-preview code,.design-failure summary,.run-diagnostic>p { color:#7a3b3b; }
+.run-diagnostic header strong { color:#8c2a35; }
+.run-diagnostic header span,.run-diagnostic>small { color:#7d4a52; }
+.diff-line.removed { color:#7a2f2f; }
+
+/* 最小字号：7-9px 提到 10-11px，不改布局高度的位置用 10px */
+.navigation kbd,.sidebar-foot small,.composer-caption,.plugin-status,.search-result small,
+.choice small,.question-actions small,.workbench-footer,.app-status,.module-section-title small,
+.metric small,.time-label,.tag,.design-history li time,.agent-result time,.first-launch-steps small,
+.question-tabs .status { font-size:11px; }
+.local-label,.context-trust,.composer-palette-badge,.composer-palette-foot,.command-timeline time,
+.context-kicker,.context-capacity-card p,.context-summary-grid small,.context-section-card header span,
+.context-check,.context-block-meta,.context-block-card>small,.context-history-item time,
+.context-preview p,.context-setting-row p,.memory-card-head small,.memory-card-footer,
+.memory-expiry,.memory-history-view small,.memory-version small { font-size:10px; }
+.memory-kicker,.memory-page-head p,.memory-empty p,.memory-list-heading span,.memory-editor-note,
+.memory-reason,.memory-generate p,.memory-empty,.context-page-head p,.context-revision small,
+.context-tab,.context-goal-preview small,.audit-banner span,.audit-item p,.audit-empty,
+.context-empty,.context-history-item p,.composer-palette-head span,.composer-palette-description,
+.welcome-foot,.message-label,.page-note,.module-note,.agent-io,.agent-steps li,.agent-event,
+.agent-status small,.environment-status,.run-controls,.tool-state,.design-dock-heading small,
+.tool-failure-previews,.tool-failure-preview code,.run-diagnostic>p,.run-diagnostic>small,
+.run-diagnostic header span,.design-failure summary,.design-confirm-card header span,
+.run-indicator time,.run-summary time,.composer-context,.message-controls button,
+.editing-banner button,.first-launch-note,#design-panel .design-region-note,
+#design-panel .history-entry-heading time,#design-panel .history-copy p,
+.shell.has-design-panel .task-workbench-toggle small,.eyebrow { font-size:11px; }
+.first-launch-note { font-size:11px!important; }
+
+/* 补充：上下文容量按钮（原 8px / 3.5:1）、侧栏次要标题、徽标、快捷提示 */
+.context-capacity-button { color:#566170; font-size:11px; max-width:240px; }
+.context-capacity-button:hover { color:#35538f; }
+.context-capacity-button.danger { color:#8f2f2f; }
+.muted,.header-badge,.shortcut,.help-button { color:#566170; }
+.breadcrumbs .muted,.task-select { color:#566170; }

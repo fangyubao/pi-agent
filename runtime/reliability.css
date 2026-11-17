@@ -1,0 +1,8 @@
+.run-controls{display:flex;align-items:center;gap:8px;color:#9d9589;font-size:10px;margin:0 4px 8px}.run-controls>span{margin-right:auto}.run-controls button{border:1px solid #e9e6e1;border-radius:6px;padding:5px 8px;background:#fff;font-size:10px;color:#92836e}.run-controls button:hover{background:#fbf3f0}.run-controls button[data-action="force-stop-agent"]{color:#a15b63}
+.popover{max-height:calc(100vh - 32px);overflow-y:auto;scrollbar-width:thin}
+#workbench-jobs { flex: 0 0 auto; max-height: 160px; overflow: auto; padding: 8px 12px; background: #f4f0ea; border-top: 1px solid #e6dfd4; }
+#workbench-jobs:empty { display: none; }
+#workbench-jobs > div { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 5px 0; font-size: 12px; }
+#workbench-jobs span { flex: 1; min-width: 100px; }
+#workbench-jobs progress { width: 72px; accent-color: #b5522b; }
+#workbench-jobs small { width: 100%; color: #b3382f; }

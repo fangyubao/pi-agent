@@ -1,0 +1,315 @@
+/* 暖色中性主题：参考 Claude Desktop 的气质（暖灰白底、赤陶色强调、居中单列对话、大圆角输入框）。
+   只覆盖设计令牌和聊天区版式。删除本文件及 index.html 里的 <link> 即可恢复原样。
+   所有文字/背景组合已按 WCAG 计算，正文不低于 4.5:1。工作台预览是独立沙箱，不受此文件影响。 */
+:root{
+  --bg:#fbf9f6; --sidebar:#f4f0ea; --soft:#f1ece4; --text:#2b2823; --muted:#6b655c; --line:#e6dfd4;
+  --blue:#b5522b; --blue-soft:#f8ebe3; --green:#1f7a5c; --error:#b3382f; --radius:12px;
+  --user-bubble:#efe9e0; --focus:#b5522b;
+  font-family:Inter,"Segoe UI","Microsoft YaHei",system-ui,sans-serif;
+}
+body,.app,.main,.page{background:var(--bg)}
+.sidebar{background:var(--sidebar);border-right-color:var(--line)}
+.titlebar,.main-header{background:var(--bg);border-bottom-color:transparent}
+.app-status{background:var(--sidebar);border-top-color:var(--line);color:var(--muted)}
+
+/* 侧栏：更轻的选中态 */
+.task-row.selected{background:#e9e2d6}
+.task-select{color:var(--muted)}
+.task-row.selected .task-select{color:var(--text)}
+.project-toggle{color:var(--text)}
+.navigation>button{color:var(--muted)}
+.navigation>button:hover{background:#ece6dc;color:var(--text)}
+.navigation>button.active{background:#e9e2d6;color:#9a4423}
+.task-row:hover{background:#eee8de}
+
+/* 对话：居中单列，更舒展 */
+.chat-page{width:100%;max-width:1440px;--chat-inset:clamp(16px,3cqi,44px)}
+.messages{padding:28px var(--chat-inset) 16px}
+.message{font-size:14px;line-height:1.85;color:var(--text)}
+.message.user{background:var(--user-bubble);color:var(--text);border-radius:16px;padding:10px 16px}
+.message-avatar,.brand-mark,.welcome-mark{color:var(--blue)}
+.message.assistant .message-text strong{color:var(--text)}
+
+/* 欢迎页 */
+.welcome h1{font-family:Georgia,"Songti SC","Noto Serif SC",serif;font-weight:500;letter-spacing:-.3px}
+.welcome p{color:var(--muted);font-size:13px}
+.shortcut{border-radius:999px;background:var(--bg);border:1px solid var(--line);color:var(--text)}
+.shortcut:hover{background:var(--soft)}
+
+/* 输入框：大圆角、柔和投影 */
+.composer-wrap{padding:8px var(--chat-inset) 18px}
+.chat-page .changed-files{max-width:none;width:100%}
+.composer{border:1px solid var(--line);border-radius:20px;background:#fff;padding:14px 16px 10px;box-shadow:0 2px 12px rgba(60,45,25,.07)}
+.composer:focus-within{border-color:#cdbfae;box-shadow:0 4px 18px rgba(60,45,25,.10)}
+.composer textarea{font-size:14px;color:var(--text)}
+.composer textarea::placeholder{color:#8a8378}
+.composer.dragover{border-color:var(--blue);background:var(--blue-soft)}
+.composer-tool,.composer-select,.compact-select{border-color:transparent;background:transparent;color:var(--muted);border-radius:8px}
+.composer-tool:hover,.composer-select:hover{background:var(--soft);color:var(--text)}
+.composer-tool.active{background:var(--blue-soft);border-color:transparent;color:#9a4423}
+.send-button{width:32px;height:32px;border-radius:10px;background:var(--blue)}
+.send-button:hover{background:#9a4423}
+.composer-caption{color:var(--muted)}
+
+/* 按钮与焦点 */
+.button{border-color:var(--line);background:#fff;border-radius:9px}
+.button:hover{background:var(--soft);border-color:#d6ccbc}
+.button.primary{background:var(--blue);border-color:var(--blue);color:#fff}
+.button.primary:hover{background:#9a4423;border-color:#9a4423}
+input:focus,textarea:focus,select:focus{outline:2px solid rgba(181,82,43,.30);border-color:var(--blue)}
+:focus-visible{outline-color:var(--focus)}
+.settings-tab.active{color:#9a4423;border-bottom-color:var(--blue)}
+.segmented button.active{background:var(--blue-soft);color:#9a4423}
+.toggle input:checked+span{background:var(--blue)}
+
+/* 弹层 */
+.popover,.dialog{border-radius:14px;border-color:var(--line);box-shadow:0 10px 30px rgba(60,45,25,.14)}
+
+/* 兜底：面板、卡片、边框里残留的冷灰蓝，统一成暖色。只改颜色，不改布局。 */
+.workbench-panel,.workbench-header,.module-container,.context-surface,.memory-surface{background:var(--bg);border-color:var(--line)}
+.workbench-header{border-bottom:1px solid var(--line)}
+.workbench-footer{background:var(--sidebar);border-top-color:var(--line);color:var(--muted)}
+.splitter{background:var(--line)}
+.side-panel-tab{border-color:var(--line)}
+.side-panel-tab.active{background:#fff;color:var(--text)}
+.module-card,.workbench-card,.plugin-row,.search-result,.setting-row,.settings-block,.design-confirm-card,.context-section-card,.context-capacity-card,.context-block-card,.memory-card{border-color:var(--line);background:#fff}
+.settings-block{background:#fff}
+.context-surface,.memory-surface{background:var(--soft)}
+.free-input,.dialog-input,.compact-select{border-color:var(--line);background:#fff}
+.tag{background:var(--soft);color:var(--muted)}
+.design-panel{background:var(--sidebar);border-color:var(--line)}
+.frame-design-banner{background:var(--blue-soft);color:#9a4423;border-bottom-color:var(--line)}
+.preview-surface{background:#fff}
+hr,.divider{border-color:var(--line)}
+
+/* 设计面板与进度：把残留的蓝色统一成强调色 */
+.design-panel,.design-dock{background:var(--sidebar)}
+.design-stage.current{border-color:var(--blue);background:var(--blue-soft);color:#9a4423}
+.design-stage .stage-index,.design-stage.current .stage-index,.wb-steps li[data-s=current] .wb-dot,.wb-dot[data-s=current]{background:var(--blue)}
+.wb-bar i[data-s=current]{background:var(--blue)}
+.wb-steps li[data-s=current]{background:var(--blue-soft)}
+.design-confirm-card header strong{color:var(--text)}
+.design-history-list .history-dot{background:var(--blue)}
+
+/* 次要文字：统一到 --muted（5.5:1），覆盖旧样式里偏浅的灰色。 */
+.plugin-symbol,.design-count,.design-flow-status,.segment,.stage-name,.design-stage small,.design-stage .stage-dot,
+.design-flow-status,.design-region-note,.design-workflow p,.design-workflow small,.workbench-art{color:var(--muted)}
+.segment.selected{color:#9a4423}
+.design-stage.current .stage-name,.design-stage.current small{color:#7f391b}
+.design-stage .stage-dot{border-color:#cdbfae}
+
+/* ===== 一体化窗口栏（参考 Claude Desktop）=====
+   标题栏与页面同底色、无分割线，只放导航按钮和状态，不再有独立的 logo 区。 */
+.titlebar{height:44px;padding:0 12px;gap:8px;background:var(--bg);border-bottom:0}
+.titlebar-nav{display:flex;align-items:center;gap:2px}
+.titlebar .icon-button{width:30px;height:30px;border:0;background:transparent;color:var(--muted);border-radius:8px;display:grid;place-items:center}
+.titlebar .icon-button .icon{width:17px;height:17px}
+.titlebar .icon-button:hover:not(:disabled){background:var(--soft);color:var(--text)}
+.titlebar .icon-button[aria-pressed="true"]{color:#9a4423}
+.titlebar .icon-button:disabled{opacity:.35;cursor:default}
+.prototype-badge{border-color:transparent;background:transparent;color:var(--muted);font-size:12px;margin-left:6px}
+.title-status{color:var(--muted)}
+/* 侧栏与标题栏同色，视觉上连成一块 */
+.sidebar{background:var(--bg);border-right:1px solid var(--line)}
+.main-header{border-bottom:0}
+
+/* 侧栏折叠：整列收起，对话区自动占满 */
+.shell{transition:grid-template-columns .18s ease}
+.shell.sidebar-collapsed{grid-template-columns:0 minmax(0,1fr)}
+.shell.sidebar-collapsed.has-workbench{grid-template-columns:0 minmax(310px,1fr) 5px minmax(355px,var(--bench-width))}
+.shell.sidebar-collapsed.has-workbench.has-design-panel{grid-template-columns:0 minmax(285px,1fr) minmax(220px,265px) 5px minmax(355px,var(--bench-width))}
+.shell.sidebar-collapsed .sidebar{visibility:hidden;overflow:hidden;padding:0;border:0;min-width:0}
+@media (prefers-reduced-motion:reduce){.shell{transition:none}}
+
+/* 底部状态栏：左侧状态，右下角放 logo */
+.app-status{height:28px;padding:0 14px;background:var(--bg);border-top:0;font-size:11px}
+.app-status-right{display:flex;align-items:center;gap:14px}
+.app-status .brand{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);text-decoration:none}
+.app-status .brand-mark{font-size:17px}
+.app-status .brand strong{font-weight:600;color:var(--text);letter-spacing:0}
+.app-status .brand:hover strong{color:#9a4423}
+
+/* ===== 无边框窗口栏（Claude Desktop 风格）=====
+   整条栏可拖动；折叠/后退/前进在左，最小化/最大化/关闭在右；按钮之外不放任何文字。 */
+.titlebar{-webkit-app-region:drag;user-select:none;height:42px;padding:0 0 0 10px;gap:4px}
+.titlebar button,.titlebar a,.titlebar input,.titlebar select{-webkit-app-region:no-drag}
+.titlebar-nav{-webkit-app-region:no-drag}
+.titlebar-drag{flex:1;align-self:stretch}
+.prototype-badge,.title-status{display:none}
+.window-controls{display:flex;align-items:stretch;align-self:stretch;margin-left:auto;-webkit-app-region:no-drag}
+.win-btn{width:46px;border:0;background:transparent;color:var(--muted);display:grid;place-items:center;border-radius:0;padding:0}
+.win-btn svg{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.win-btn:hover{background:var(--soft);color:var(--text)}
+.win-btn:focus-visible{outline-offset:-3px}
+.win-close:hover{background:#c42b1c;color:#fff}
+/* 最大化时侧栏与标题栏之间没有间隙；未最大化保持圆角留白 */
+.is-maximized .app{border-radius:0}
+
+/* 界面预览：顶部显眼入口、标签高亮 */
+.task-preview-toggle{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--blue);border-radius:9px;padding:5px 11px;color:#fff;background:var(--blue);font-size:12px;font-weight:600;white-space:nowrap;cursor:pointer}
+.task-preview-toggle .icon{width:15px;height:15px}
+.task-preview-toggle:hover{background:#9a4423;border-color:#9a4423}
+.task-preview-toggle.active{background:var(--blue-soft);color:#9a4423}
+.side-panel-tab.preview-tab:not(.active){background:var(--blue-soft);border-color:#ecd3c5}
+.side-panel-tab.preview-tab .tab-dot{background:var(--blue)}
+.preview-hint{margin:0;padding:6px 14px;font-size:12px;color:var(--muted);border-top:1px solid var(--line);background:var(--sidebar)}
+.preview-hint:empty{display:none}
+.preview-surface{display:flex;flex-direction:column}
+.preview-surface iframe{flex:1;min-height:0}
+
+/* 左侧「工作台」一级栏目：与「项目」同级 */
+.sidebar-section{border-top:1px solid var(--line);margin-top:8px;padding-top:6px;overflow:auto;max-height:42%}
+.section-heading{padding-top:6px}
+.section-toggle{display:flex;align-items:center;gap:6px;border:0;background:transparent;color:var(--text);padding:0;font:inherit;cursor:pointer}
+.section-toggle h2{margin:0;font-size:13px;font-weight:600}
+.section-toggle .icon{width:14px;height:14px;color:var(--muted)}
+.wb-empty{padding:10px 12px;font-size:12px;color:var(--muted);line-height:1.7}
+
+/* MCP 页面 */
+.mcp-toolbar{display:flex;flex-wrap:wrap;gap:8px;margin:18px 0 6px}
+.mcp-list{display:grid;gap:12px;margin-top:14px}
+.mcp-card{background:#fff;border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.mcp-card.on{border-color:#e3c3b3}
+.mcp-card header{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.mcp-card h3{margin:0 0 4px;font-size:14px}
+.mcp-cmd{display:block;font:12px/1.5 Consolas,"Cascadia Code",monospace;color:var(--muted);word-break:break-all;background:var(--soft);padding:4px 8px;border-radius:6px}
+.mcp-env,.mcp-note{margin:8px 0 0;font-size:12px;color:var(--muted)}
+.mcp-error{margin:8px 0 0;padding:8px 10px;border-radius:8px;background:#f8e4e1;color:#8c2f2f;font-size:12px;line-height:1.6;word-break:break-word}
+.mcp-tools{margin-top:8px;font-size:12px}.mcp-tools summary{cursor:pointer;color:var(--ok);font-weight:600}
+.mcp-tools ul{list-style:none;margin:8px 0 0;padding:0;display:grid;gap:6px}
+.mcp-tools li{display:grid;gap:2px;padding:6px 8px;background:var(--soft);border-radius:8px}
+.mcp-tools li span{color:var(--muted)}
+.mcp-card footer{display:flex;gap:8px;margin-top:12px}
+.button.danger{color:#8c2f2f}.button.danger:hover{background:#f8e4e1;border-color:#e6bcb6}
+.mcp-form{display:grid;gap:10px;background:#fff;border:1px solid var(--line);border-radius:12px;padding:16px;margin-top:12px}
+.mcp-form h3{margin:0}.mcp-form label{display:grid;gap:4px;font-size:12px;color:var(--muted)}
+.mcp-form input,.mcp-form textarea{font:13px/1.5 Consolas,"Cascadia Code",monospace;color:var(--text)}
+.mcp-warn{margin:0;padding:8px 10px;border-radius:8px;background:#f6ecd6;color:#6b4700;font-size:12px;line-height:1.6}
+.mcp-form-actions{display:flex;justify-content:flex-end;gap:8px}
+.mcp-empty{padding:28px 12px;text-align:center}
+
+/* 页头空间紧张时（设计面板 / 窄窗口）：入口保留但只显示图标；去掉次要按钮的文字，让面包屑留出宽度。 */
+#breadcrumb{min-width:0;flex:1 1 auto}
+.breadcrumbs{min-width:0}
+#page-actions{flex:0 0 auto;gap:4px}
+.shell.has-design-panel .task-preview-toggle span,
+.shell.has-design-panel .task-workbench-toggle span,
+.shell.has-design-panel .task-workbench-toggle small,
+.shell.has-design-panel .summary-toggle span{display:none}
+.shell.has-design-panel .task-preview-toggle,
+.shell.has-design-panel .task-workbench-toggle,
+.shell.has-design-panel .summary-toggle{padding:5px 8px;min-width:30px;justify-content:center}
+
+/* 工作台栏目里的任务类型标注：创建 / 修改用文字加颜色区分，使用不加标注 */
+.kind-badge{flex:0 0 auto;font-style:normal;font-size:11px;font-weight:600;line-height:1;padding:3px 6px;border-radius:5px}
+.kind-create{background:#f8ebe3;color:#8c3d1a}
+.kind-modify{background:#e3f1ec;color:#175c45}
+.wb-group .task-select{gap:6px}
+
+/* 对话模式选择：工作流模式时用强调色标出，让人一眼知道当前不是基础模式 */
+.mode-select{font-weight:600}
+.mode-select.is-workflow{background:var(--blue-soft);color:#9a4423;border-color:#ecd3c5}
+.workflow-canvas-toggle{border-color:var(--blue)}
+
+/* ===== 消息气泡下方的操作（参考 Claude Desktop）=====
+   图标按钮放在气泡外面、正下方：悬停或聚焦到这条消息时才出现；键盘用户 Tab 到按钮时也会出现。 */
+.message-controls{display:flex;gap:2px;margin:4px 0 0;padding:0;border:0;opacity:0;transition:opacity .15s;min-height:28px}
+.message:hover .message-controls,.message:focus-within .message-controls,.message-controls:focus-within{opacity:1}
+.message.user .message-controls{justify-content:flex-end}
+.message-controls .msg-action{display:inline-grid;place-items:center;width:28px;height:28px;border:0;background:transparent;color:var(--muted);border-radius:8px;padding:0;cursor:pointer}
+.message-controls .msg-action .icon{width:15px;height:15px}
+.message-controls .msg-action:hover{background:var(--soft);color:var(--text)}
+.message-controls .msg-action:focus-visible{outline:2px solid var(--focus);outline-offset:1px}
+@media (hover:none){.message-controls{opacity:1}}                               /* 触屏没有悬停，始终显示 */
+/* 用户消息：气泡与操作分开。气泡自己右对齐，控件在它下面右对齐 */
+.message.user{display:flex;flex-direction:column;align-items:flex-end;background:transparent;padding:0;border-radius:0;max-width:100%;margin-left:auto}
+.message.user .user-bubble{max-width:85%;background:var(--user-bubble);color:var(--text);border-radius:16px;padding:10px 16px}
+/* 助手消息：控件在气泡下面靠左 */
+.message.assistant .message-content{flex:1;min-width:0}
+.message.assistant .message-controls{justify-content:flex-start}
+
+/* ===== 就地编辑：气泡本身变成编辑框 ===== */
+.message.user.editing{align-items:stretch;width:100%}
+.edit-bubble{display:flex;flex-direction:column;gap:8px;background:#fff;border:1px solid #cdbfae;border-radius:16px;padding:12px 14px;box-shadow:0 2px 12px rgba(60,45,25,.08)}
+.edit-bubble:focus-within{border-color:var(--blue);box-shadow:0 0 0 3px rgba(181,82,43,.15)}
+.edit-bubble textarea{width:100%;border:0;outline:0;resize:none;background:transparent;color:var(--text);font:inherit;font-size:14px;line-height:1.7;min-height:56px;max-height:320px;overflow:auto;padding:0}
+.edit-note{margin:0;font-size:12px;color:var(--muted);line-height:1.5}
+.edit-actions{display:flex;justify-content:flex-end;gap:8px}
+
+/* ---- 工作路径：新建任务时选择 + 聊天框下的路径下拉 ---- */
+.path-pick{display:flex;gap:8px}.path-pick .dialog-input{flex:1;min-width:0;text-overflow:ellipsis}
+.dialog-hint{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px}.path-note{font-size:12px;color:var(--muted);margin:6px 0 0}
+.path-bar{position:relative;display:flex;justify-content:flex-start;padding:4px 6px 0}
+.path-toggle{display:inline-flex;align-items:center;gap:6px;max-width:100%;border:0;background:transparent;color:var(--muted);font:inherit;font-size:12px;padding:3px 8px;border-radius:8px;cursor:pointer}
+.path-toggle:hover,.path-toggle[aria-expanded="true"]{background:var(--surface,#f4f0ea);color:var(--text)}
+.path-toggle span{max-width:260px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.path-toggle .icon{width:14px;height:14px}.path-toggle b{font-size:10px}
+.path-menu{position:absolute;left:6px;bottom:calc(100% - 2px);width:min(480px,92vw);max-height:320px;overflow:auto;background:var(--bg,#fbf9f6);border:1px solid var(--line,#e6dfd4);border-radius:12px;box-shadow:0 8px 28px rgba(43,40,35,.14);padding:6px;z-index:30}
+.path-menu[hidden]{display:none}
+.path-item{display:grid;grid-template-columns:1fr auto;gap:0 10px;width:100%;text-align:left;border:0;background:transparent;border-radius:8px;padding:8px 10px;font:inherit;cursor:pointer;color:var(--text)}
+.path-item:hover{background:var(--surface,#f4f0ea)}.path-item strong{font-size:13px;grid-column:1}.path-item em{font-style:normal;font-size:11px;color:var(--muted);grid-column:2;grid-row:1}
+.path-item small{grid-column:1/3;font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.path-item.primary strong::after{content:"  工作文件夹";font-weight:400;font-size:11px;color:var(--accent,#b5522b)}
+.path-empty{margin:8px 10px;font-size:12px;color:var(--muted)}.path-actions{border-top:1px solid var(--line,#e6dfd4);margin-top:6px;padding:8px 6px 2px}
+
+.path-recover{display:flex;align-items:center;gap:6px}.path-recover .path-item{flex:1;min-width:0}.path-recover .button{flex:none;font-size:12px;padding:4px 10px}
+
+/* ---- 交互选项卡（Claude Code 风格）：编号 + 推荐标记 + 自动选择倒计时 ---- */
+.question-card .question-message{margin:6px 0 10px;color:var(--muted);font-size:13px}
+.question-card .choice{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--line,#e6dfd4);border-radius:10px;margin:6px 0;cursor:pointer;background:var(--bg,#fbf9f6)}
+.question-card .choice:hover,.question-card .choice:has(input:checked){border-color:var(--accent,#b5522b);background:var(--accent-soft,#f6e6dd)}
+.question-card .choice{position:relative}
+.question-card .choice input[type="radio"]{position:absolute;left:12px;top:50%;width:1px;height:1px;margin:0;opacity:0;pointer-events:none}
+.question-card .choice:has(input:focus-visible){outline:2px solid var(--accent,#b5522b);outline-offset:2px}
+.question-card .choice-no{display:inline-grid;place-items:center;width:22px;height:22px;border-radius:6px;background:var(--surface,#f4f0ea);font-size:12px;font-weight:600;color:var(--muted)}
+.question-card .choice-text{flex:1}.question-card .choice-rec{font-style:normal;font-size:11px;color:var(--accent,#b5522b);border:1px solid currentColor;border-radius:999px;padding:0 8px}
+.question-card .choice-hint{margin:6px 2px 0;font-size:12px;color:var(--muted)}
+
+/* ---- 路径右键菜单（打开 › 子菜单） ---- */
+.path-ctx{position:fixed;z-index:60;min-width:190px;background:var(--bg,#fbf9f6);border:1px solid var(--line,#e6dfd4);border-radius:10px;box-shadow:0 8px 28px rgba(43,40,35,.18);padding:4px}
+.ctx-item{display:flex;align-items:center;justify-content:space-between;gap:16px;width:100%;text-align:left;border:0;background:transparent;color:var(--text);font:inherit;font-size:13px;padding:7px 10px;border-radius:7px;cursor:pointer;white-space:nowrap}
+.ctx-item:hover,.ctx-item:focus-visible,.ctx-parent:hover>.ctx-item{background:var(--surface,#f4f0ea);outline:none}
+.ctx-parent{position:relative}.ctx-sub{display:none;position:absolute;left:100%;top:-5px;min-width:180px;background:var(--bg,#fbf9f6);border:1px solid var(--line,#e6dfd4);border-radius:10px;box-shadow:0 8px 28px rgba(43,40,35,.18);padding:4px}
+.ctx-parent:hover>.ctx-sub,.ctx-parent:focus-within>.ctx-sub{display:block}.path-ctx.flip .ctx-sub{left:auto;right:100%}
+
+/* The custom answer is editable before selecting its radio. */
+.question-card .choice-custom{display:block;cursor:default;padding:10px 12px}
+.question-card .choice-custom-label{display:flex;align-items:center;min-height:22px;cursor:pointer;font-weight:500}
+.question-card .choice-custom textarea{display:block;width:100%;box-sizing:border-box;margin-top:7px;min-height:66px;max-height:160px;resize:vertical;background:var(--bg,#fbf9f6);font:inherit;line-height:1.5;border:1px solid var(--line,#e6dfd4);border-radius:7px;padding:8px 10px}
+.question-card .choice-custom textarea:focus{outline:2px solid var(--accent,#b5522b);outline-offset:1px}
+
+/* Keep the design hide/resume action readable beside the mode badge. */
+.shell.has-design-panel .task-workbench-toggle span{display:inline}
+.shell.has-design-panel .task-workbench-toggle{width:auto;min-width:78px;padding:5px 8px}
+
+/* Four columns leave a narrow chat header. Give the title its own row,
+   while keeping every action visible and the design toggle readable. */
+.main{container-type:inline-size;container-name:chat-column}
+@container chat-column (max-width:460px){
+  .main-header{height:auto;min-height:82px;flex-wrap:wrap;gap:6px;padding:10px 18px}
+  #breadcrumb,.shell.has-design-panel .main-header #breadcrumb{flex:1 0 100%;width:100%;overflow:hidden}
+  #page-actions{margin-left:auto;max-width:100%}
+}
+
+/* Keep navigation visible on warm surfaces, including inactive scrollbars. */
+:root{--scroll-thumb:#82786c;--scroll-track:#eee8df}
+*{scrollbar-color:var(--scroll-thumb) var(--scroll-track)}
+.messages,.page,.design-history-list,.design-stage-viewport{scrollbar-width:auto}
+.messages{scrollbar-gutter:stable both-edges}
+::-webkit-scrollbar{width:12px;height:12px}
+::-webkit-scrollbar-track{background:var(--scroll-track)}
+::-webkit-scrollbar-thumb{background:var(--scroll-thumb);border:3px solid var(--scroll-track);border-radius:8px}
+::-webkit-scrollbar-thumb:hover{background:#5e554b}
+.run-indicator,.run-summary,.run-indicator time,.run-summary time{color:#6b655c}
+.running-dot{background:#b5522b}
+@keyframes run-pulse{50%{opacity:.65}}
+progress{accent-color:#a74320}
+progress::-webkit-progress-bar{background:#e9dfd3;border-radius:6px}
+progress::-webkit-progress-value{background:#a74320;border-radius:6px}
+#workbench-jobs progress{accent-color:#a74320;height:8px}
+.prob-track{background:#e9dfd3}
+.prob-fill{background:#a74320}
+#design-panel .design-stage.current .stage-card{border-color:#b5522b;background:#fff6ef;color:#7f391b}
+#design-panel .design-stage.current .stage-dot{background:#a74320;border-color:#a74320;color:#fff}
+#design-panel .design-stage.next .stage-card{border-color:#d1bcab;color:#6b594b}
+#design-panel .design-flow-status{color:#6b594b;border-color:#d1bcab}
+#design-panel .history-entry-heading strong{color:#554c41}
+#design-panel .history-entry-heading time,#design-panel .history-copy p{color:#75695b}

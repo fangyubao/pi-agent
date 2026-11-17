@@ -1,0 +1,31 @@
+'use strict';
+const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs/promises'),os=require('node:os'),path=require('node:path');
+const {createStorage}=require('./state-store-host.cjs');
+test('存储线程串行合并任务补丁，移动、删除、备份和重新启动保持完整数据',async t=>{
+  const dir=await fs.mkdtemp(path.join(os.tmpdir(),'pi-storage-worker-'));let host=createStorage(dir);
+  t.after(async()=>{await host.close();if(path.dirname(dir)!==os.tmpdir())throw new Error('清理路径越界');await fs.rm(dir,{recursive:true,force:true});});
+  const state={schema:2,settings:{},projects:[{id:'p',name:'项目',tasks:[{id:'a',messages:['one']},{id:'b',messages:['retain']}]}]};
+  assert.equal((await host.request('save',{state})).ok,true);
+  const patch={meta:{schema:2,settings:{},activeTask:'a'},projects:[{id:'p',name:'项目',taskIds:['b']},{id:'q',name:'新项目',taskIds:['a']}],tasks:[{id:'a',messages:['one','two']}]};
+  const write=host.request('save',{patch}),read=host.request('load');assert.equal((await write).ok,true);const loaded=(await read).result.state;
+  assert.deepEqual(loaded.projects.map(p=>p.tasks.map(t=>t.messages)),[[['retain']],[['one','two']]]);
+  const invalid=await host.request('save',{patch:{...patch,projects:[{id:'p',taskIds:['missing']}]}});assert.equal(invalid.ok,false);
+  assert.deepEqual((await host.request('load')).result.state,loaded);
+  assert.equal((await host.request('backup')).result.count,2);assert.equal((await host.request('backup')).result.count,0);
+  const backups=(await host.request('vault',{method:'backups',args:['q']})).result;
+  assert.deepEqual((await host.request('vault',{method:'restore',args:['q',backups[0].id]})).result,loaded.projects[1]);
+  await host.close();host=createStorage(dir);assert.deepEqual((await host.request('load')).result.state,loaded);
+  assert.equal((await host.request('save',{patch:{...patch,projects:[{id:'q',taskIds:['a']}],tasks:[]}})).ok,true);
+  assert.equal((await host.request('load')).result.state.projects.length,1);
+  assert.equal((await host.request('backup')).result.count,1); // project metadata changed (name was removed)
+  assert.equal((await host.request('backup')).result.count,0);
+  const messagePatch={meta:{schema:2,settings:{}},projects:[{id:'q',taskIds:['a']}],tasks:[{id:'a',messages:[{id:'m1',text:'keep'},{id:'m2',text:'old'}]}]};
+  await host.request('save',{patch:messagePatch});
+  messagePatch.tasks=[];messagePatch.taskPatches=[{id:'a',meta:{id:'a',draft:'draft'},fields:{},messageIds:['m1','m2','m3'],messages:[{id:'m2',text:'updated'},{id:'m3',text:'new'}]}];
+  assert.equal((await host.request('save',{patch:messagePatch})).ok,true);
+  assert.deepEqual((await host.request('load')).result.state.projects[0].tasks[0].messages.map(m=>m.text),['keep','updated','new']);
+  messagePatch.taskPatches=[{id:'a',meta:null,fields:{draft:'changed'},messageIds:['m1','m2','m3'],messages:[{id:'m2',text:'stream'}]}];assert.equal((await host.request('save',{patch:messagePatch})).ok,true);
+  const final=(await host.request('load')).result.state.projects[0].tasks[0];assert.equal(final.draft,'changed');assert.equal(final.messages[1].text,'stream');
+  assert.equal((await host.request('backup')).result.count,1);
+  assert.equal((await host.request('backup')).result.count,0);
+});

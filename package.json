@@ -1,0 +1,101 @@
+{
+  "name": "pi-workbench-desktop",
+  "version": "0.2.14",
+  "private": true,
+  "description": "Pi Agent desktop workbench shell with local web workbenches",
+  "main": "bootstrap.cjs",
+  "scripts": {
+    "dev": "electron .",
+    "start": "electron .",
+    "test:smoke": "node smoke-test.cjs",
+    "test:agent": "node agent-integration-test.cjs",
+    "test:recovery": "node agent-recovery-integration-test.cjs",
+    "test:launch": "node --test runtime/agent-launch.test.cjs",
+    "test:e2e": "playwright test",
+    "test:runtime": "node --test runtime/*.test.cjs",
+    "test:all": "npm run test:agent && npm run test:recovery && npm run test:runtime && npm run test:e2e",
+    "test:deepeval": "python evals/deepeval_agent_eval.py",
+    "setup:runtime": "npm ci --prefix packaging/pi-runtime --omit=dev --ignore-scripts",
+    "prepare:runtime": "node scripts/prepare-runtime.cjs",
+    "dist": "npm run prepare:runtime && electron-builder --win nsis"
+  },
+  "build": {
+    "appId": "local.pi.workbench",
+    "productName": "Pi Workbench",
+    "protocols": [
+      {
+        "name": "Pi Workbench Local Links",
+        "schemes": [
+          "pi-workbench"
+        ]
+      }
+    ],
+    "nsis": {
+      "include": "build/installer.nsh"
+    },
+    "electronDist": "node_modules/electron/dist",
+    "afterPack": "scripts/check-runtime-package.cjs",
+    "files": [
+      "index.html",
+      "styles.css",
+      "app.js",
+      "main.cjs",
+      "bootstrap.cjs",
+      "preload.cjs",
+      "runtime",
+      "node_modules/markdown-it/dist/browser/markdown-it.umd.min.js",
+      "!runtime/*.test.cjs",
+      "contexts",
+      "plugins",
+      "workbenches",
+      "README.md",
+      "DESIGN.md"
+    ],
+    "extraResources": [
+      {
+        "from": "packaging/pi-runtime",
+        "to": "pi-runtime",
+        "filter": [
+          "package.json",
+          "package-lock.json"
+        ]
+      },
+      {
+        "from": "packaging/pi-runtime/node_modules",
+        "to": "pi-runtime/node_modules",
+        "filter": ["**/*"]
+      },
+      {
+        "from": "packaging/node-runtime",
+        "to": "runtime"
+      }
+    ],
+    "asarUnpack": [
+      "runtime/workbench-*.cjs",
+      "runtime/workbench-test-*.html",
+      "contexts/workbench-testing.md",
+      "runtime/state-store*.cjs",
+      "runtime/local-vault.cjs",
+      "runtime/knowledge-index*.cjs",
+      "runtime/workbench-package.cjs",
+      "runtime/workflow-graph.js",
+      "node_modules/**",
+      "workbenches/**"
+    ],
+    "win": {
+      "target": "nsis",
+      "artifactName": "Pi-Workbench-${version}-Setup.${ext}",
+      "signAndEditExecutable": false
+    }
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "electron": "^38.1.0",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "mammoth": "1.13.0",
+    "markdown-it": "15.0.2",
+    "pdf-parse": "2.4.5"
+  }
+}

@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; frame-src 'self' pi-preview:">
+  <title>Pi Workbench</title>
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="./runtime/chat-history.js"></script>
+  <link rel="stylesheet" href="./runtime/settings.css">
+  <link rel="stylesheet" href="./runtime/transcript.css">
+  <link rel="stylesheet" href="./runtime/design-panel.css">
+  <link rel="stylesheet" href="./runtime/composer-palette.css">
+  <link rel="stylesheet" href="./runtime/memory.css">
+  <link rel="stylesheet" href="./runtime/context-inspector.css">
+  <link rel="stylesheet" href="./runtime/reliability.css">
+  <link rel="stylesheet" href="./runtime/help.css">
+  <link rel="stylesheet" href="./runtime/contrast.css">
+  <link rel="stylesheet" href="./runtime/theme-warm.css">
+  <script defer src="./node_modules/markdown-it/dist/browser/markdown-it.umd.min.js"></script>
+  <script defer src="./runtime/execution-graph.js"></script>
+  <script defer src="./runtime/response-language.js"></script>
+  <script defer src="./runtime/transcript.js"></script>
+  <script defer src="./runtime/text-diff.js"></script>
+  <script defer src="./runtime/context-manager.js"></script>
+  <script defer src="./runtime/workbench-agent.js"></script>
+  <script defer src="./runtime/provider-protocols.js"></script>
+  <script defer src="./runtime/provider-manager.js"></script>
+  <script defer src="./runtime/provider-settings.js"></script>
+  <script defer src="./runtime/composer-palette.js"></script>
+  <script defer src="./runtime/memory-manager.js"></script>
+  <script defer src="./runtime/context-inspector.js"></script>
+  <script defer src="./runtime/context-transport.js"></script>
+  <script defer src="./runtime/design-workflow.js"></script>
+  <script defer src="./runtime/reliability-ui.js"></script>
+  <script defer src="./runtime/help.js"></script>
+  <script defer src="./runtime/workflow-graph.js"></script>
+  <script defer src="./runtime/model-tiers.js"></script>
+  <script defer src="./runtime/workflow-run.js"></script>
+  <script defer src="./runtime/workbench-library.js"></script>
+  <script defer src="./runtime/mcp-manager.js"></script>
+  <script defer src="./runtime/interaction-timeout.js"></script>
+  <script defer src="./runtime/ui-settings.js"></script>
+  <script defer src="./runtime/persistence.js"></script>
+  <script defer src="./runtime/catalog-controls.js"></script>
+  <script defer src="./runtime/job-controls.js"></script>
+  <script defer src="./app.js"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="titlebar" id="titlebar">
+      <div class="titlebar-nav" role="toolbar" aria-label="窗口导航">
+        <button type="button" class="icon-button" id="nav-sidebar" data-action="toggle-sidebar" aria-label="折叠侧栏" aria-pressed="false" title="折叠 / 展开侧栏 · Ctrl+B"></button>
+        <button type="button" class="icon-button" id="nav-back" data-action="nav-back" aria-label="后退" title="后退 · Alt+←" disabled></button>
+        <button type="button" class="icon-button" id="nav-forward" data-action="nav-forward" aria-label="前进" title="前进 · Alt+→" disabled></button>
+      </div>
+      <div class="titlebar-drag" aria-hidden="true"></div>
+      <div class="window-controls" role="group" aria-label="窗口控制">
+        <button type="button" class="win-btn" id="win-min" data-win="minimize" aria-label="最小化" title="最小化"></button>
+        <button type="button" class="win-btn" id="win-max" data-win="toggle-maximize" aria-label="最大化" title="最大化"></button>
+        <button type="button" class="win-btn win-close" id="win-close" data-win="close" aria-label="关闭" title="关闭"></button>
+      </div>
+    </header>
+    <div class="shell" id="shell">
+      <aside class="sidebar" aria-label="项目与功能">
+        <div class="project-heading"><h2>项目</h2><div class="actions">
+          <button class="icon-button bordered" data-action="root-menu" title="整理与排序" aria-label="项目栏选项" aria-haspopup="menu" data-icon="sliders"></button>
+          <button class="icon-button bordered primary-icon" data-action="new-project" title="新增项目" aria-label="新增项目" data-icon="plus"></button>
+        </div></div>
+        <div class="projects" id="projects"></div>
+        <div class="sidebar-section" id="workbench-section" aria-label="工作台"></div>
+        <nav class="navigation" aria-label="功能入口">
+          <button data-route="search"><span data-icon="search"></span><span>搜索</span><kbd>Ctrl K</kbd></button>
+          <button data-route="plugins"><span data-icon="puzzle"></span><span>插件</span></button>
+          <button data-route="workbenches"><span data-icon="layout"></span><span>工作台</span></button>
+          <button data-route="mcp"><span data-icon="plug"></span><span>MCP</span></button>
+          <button data-route="settings"><span data-icon="settings"></span><span>设置</span></button>
+        </nav>
+      </aside>
+      <main class="main" id="main">
+        <header class="main-header"><div id="breadcrumb"></div><div id="page-actions" class="actions"></div></header>
+        <div class="page" id="page"></div>
+      </main>
+      <aside class="design-panel" id="design-panel" aria-label="工作台设计历史与进度" hidden><div id="design-panel-content"></div></aside>
+      <div id="splitter" class="splitter" role="separator" tabindex="0" aria-label="调整工作台宽度" aria-orientation="vertical" aria-valuemin="32" aria-valuemax="58" aria-valuenow="45" hidden></div>
+      <aside class="workbench-panel" id="workbench-panel" aria-label="右侧面板" hidden>
+        <header class="workbench-header"><div id="side-panel-tabs" class="side-panel-tabs" role="tablist" aria-label="右侧面板标签"></div><div id="side-panel-actions" class="side-panel-actions"></div></header>
+        <div id="module-container" class="module-container">
+          <iframe id="module-frame" title="内置本地工作台" style="display:block;width:100%;height:100%;border:0;background:#fbfcfe" hidden></iframe>
+          <section id="preview-surface" class="preview-surface" aria-label="界面预览" hidden><iframe id="preview-frame" title="工作台界面预览" sandbox="allow-scripts allow-forms allow-modals" hidden></iframe><p id="preview-empty" class="preview-empty"></p><p id="preview-hint" class="preview-hint"></p></section>
+          <section id="memory-surface" class="memory-surface" aria-label="记忆管理" hidden></section>
+          <section id="context-surface" class="context-surface" aria-label="上下文查看" hidden></section>
+        </div>
+        <footer class="workbench-footer"><span id="side-panel-status"><i class="live-dot"></i>本地面板</span><span id="revision-status"></span></footer>
+      </aside>
+    </div>
+    <footer class="app-status"><span id="scope-status">基础模式 · 无工作台载入</span><span class="app-status-right"><span id="persistence-status">本地保存</span><a class="brand" href="#chat" aria-label="Pi Workbench · 返回当前任务"><span class="brand-mark">π</span><strong>Pi Workbench</strong></a></span></footer>
+  </div>
+  <div class="popover" id="menu" role="menu" hidden></div>
+  <div class="popover submenu" id="submenu" role="menu" aria-label="子菜单" hidden></div>
+  <dialog id="dialog"><form id="dialog-form"><div class="dialog-heading"><h2 id="dialog-title"></h2><button type="button" class="icon-button" data-action="close-dialog" aria-label="关闭对话框" data-icon="close"></button></div><div id="dialog-body"></div><div class="dialog-actions"><button type="button" class="button" data-action="close-dialog">取消</button><button type="submit" class="button primary">确认</button></div></form></dialog>
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <dialog id="first-launch" class="first-launch" aria-labelledby="first-launch-title">
+    <div class="first-launch-heading"><span class="brand-mark">π</span><div><h2 id="first-launch-title">欢迎使用 Pi Workbench</h2><p>从对话开始，也可以打开一个工作台。</p></div></div>
+    <div class="first-launch-body">
+      <h3>工作台可以做什么？</h3>
+      <p>工作台是运行在桌面软件右侧的本地操作界面。用户可以直接拖拽、编辑和运行，Agent 也可以读取结构化状态并执行声明好的动作。</p>
+      <div class="first-launch-steps"><div><strong>01</strong><span>打开工作台<br><small>从“工作台”目录选择使用或设计</small></span></div><div><strong>02</strong><span>创建或修改<br><small>在当前任务中实时查看布局</small></span></div><div><strong>03</strong><span>连接知识库<br><small>让设计更符合你的领域和习惯</small></span></div></div>
+      <p class="first-launch-note">创建工作台会自动新建设计任务；使用已有工作台时，可以选择项目和任务。</p>
+    </div>
+    <div class="first-launch-actions"><button type="button" class="button" data-action="dismiss-first-launch">稍后查看</button><button type="button" class="button primary" data-action="first-launch-workbenches">打开工作台</button></div>
+  </dialog>
+</body>
+</html>
