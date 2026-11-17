@@ -1,35 +1,41 @@
-# Pi Workbench 桌面工作台
+# Pi Workbench
 
-这是一个独立桌面软件：外层是 Electron 桌面壳，负责项目、任务、对话和 Pi Agent；右侧工作台是仅在开启后载入的本地 Web 内容。用户启动的是桌面应用，不是浏览器页面。
+基于 Electron 桌面壳和 Pi Agent 的本地工作台与工作流应用：左侧管项目和任务，中间和 Pi Agent 对话，右侧按需打开本地 HTML 工作台或工作流画布。
 
-## 安全与 API 配置说明
+## 核心特性
 
-- 本仓库不包含任何预置 API Key、Token 或个人用户数据；默认启动为空白配置。
-- 首次启动后，请在桌面端右上角「设置 → 模型与 API」中填入你自己的接口地址、API Key 和模型（支持 OpenAI Compatible、OpenAI Responses、Anthropic、Google Gemini 与本地 Ollama）。
-- 凭据通过 Electron `safeStorage` 加密保存在本机应用数据目录（不会写入源码仓库）。
+### 工作台（Workbench）
 
-## 桌面运行
+- **分层与共会话**：每个自建工作台分成 `ui/` 和独立 Node Worker 后端 `server/`（状态、动作、语义事件、后台任务），桌面界面和 Agent 共用同一个后端会话，写操作按 `revision` 串行校验。
+- **自主建测与试运行**：Agent 可调 `scaffoldWorkbench` 直接生成工程，`startWorkbenchTrial` / `stopWorkbenchTrial` 启停试运行，用 `inspectWorkbenchUI`、`actWorkbenchUI`、`captureWorkbenchUI`、`callWorkbenchBackend` 和 `readWorkbenchEvents` 直接在真实运行页面和后端里测功能、看截图、查报错。
+- **完全批准模式**：切到「完全批准」后，工作台操作、前端交互和特权后端动作不再弹窗确认；设计任务点击「全自动完成设计并验证」可从需求确认一路跑到发布准备并自动发布到本地目录。
+- **发布门禁（`verifyWorkbench`）**：在独立进程和临时源码副本中跑通后端测试及 `tests/ui-scenarios.json` 前端用例，并检查「打开 → 读取 → 关闭 → 重开」状态恢复。结果绑定源码指纹，未通过或改过代码不能发布。
+- **可视化布局与版本目录**：右侧画布支持直接框选、拖拽、缩放、对齐并输出 `ui/layout.css`；发布支持多版本共存、修改独立副本、停用、卸载与快照对比回滚。
 
-首次准备依赖后：
+### 工作流（Workflow）
+
+- **任务拆解与画布编辑**：开启工作流模式的任务会先过一遍拆解器，按复杂度决定直接回答还是拆成最多 36 个节点的依赖图（支持增删改节点、子智能体归属、追问或修改流程），在右侧无限画布里展示和微调，所有改图动作按 `baseRevision` 校验防冲突。
+- **按层并行与上下文隔离**：无环拆层后按层并行跑节点（并发上限 3）；每个节点只收到自己的指令和直接上游的截断结论（包在 `DATA_BEGIN` / `DATA_END` 里），不带整段聊天记录，重改某个节点只让它的下游节点标为过期。
+- **五档分级选模型**：设置里最多配 5 个难度档位，可跨不同厂商；节点按 `节点手选 > 子智能体指定 > 难度档位 > 主模型` 选实际使用的模型。
+- **产物落盘与离线浏览**：结果固定写到任务工作目录的 `workflow/` 下（包含 `plan.md`、`plan.json` 及按 `<节点编号>-<标题>/` 建好的目录），正文与表格自动提取为 `.md` 或 `.xlsx`，输出网页/SVG 时自动去掉脚本和外网访问，并可选生成单文件离线总览页 `workflow/index.html`（三层阅读视图）。
+
+## 运行与测试
+
+依赖和内置 Pi 运行时准备好就能直接跑：
 
     npm install
     npm run setup:runtime
     npm start
 
-运行底层单元测试与端到端回归测试（测试均使用本地模拟模型端点，不消耗在线 API 额度）：
+模型接口和 Key 在桌面右上角「设置」里填，存在本机应用数据目录，不进仓库；测试默认跑本地 mock 模型服务，不花真实额度：
 
     npm run test:runtime
     npm run test:e2e
-
-启动带 `--remote-debugging-port=9339` 的隔离开发实例后，可执行桌面烟雾测试：
-
     npm run test:smoke
 
-生成 Windows 安装包：
+打 Windows 安装包（输出在 `dist/`）：
 
     npm run dist
-
-输出安装包位于 `dist/`。
 
 ## 0.2.12 聊天切换与后台响应
 
