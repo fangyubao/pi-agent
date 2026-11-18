@@ -1,6 +1,8 @@
 # Pi Workbench
 
-基于 Electron 桌面壳和 Pi Agent 的本地工作台与工作流应用：左侧管项目和任务，中间和 Pi Agent 对话，右侧按需打开本地 HTML 工作台或工作流画布。
+基于 Electron 桌面壳和 Pi Agent 的本地工作台与工作流应用：左侧管项目和任务，中间和 Pi Agent 对话，右侧按需打开本地 HTML 工作台或工作流画布；支持一键生成自包含 MCP 配对包，把 OpenClaw、OpenCode / Claude / Codex 等本地 CLI 以及 MCP 在线接力 Agent 统一接入工作台协同。
+
+> **Windows 安装包直接下载**：前往 [Releases v0.2.14](https://github.com/fangyubao/pi-agent/releases/tag/v0.2.14) 下载 [`Pi-Workbench-0.2.14-Setup.exe`](https://github.com/fangyubao/pi-agent/releases/download/v0.2.14/Pi-Workbench-0.2.14-Setup.exe)（内置 Node 24.19.0 与 Pi 1.5.0，开箱即用，无需另装依赖）。
 
 ## 核心特性
 
@@ -35,6 +37,28 @@
 
 *勾选「HTML 交互」后生成的离线报告 `workflow/index.html`：支持节点导航、流程图定位、表格排序过滤及 `.xlsx` 导出链接。*
 
+![工作流单步交互演示与核心指标卡](docs/images/workflow-demo-view.png)
+
+*升级后的单步交互演示视图：默认聚焦当前步骤，配合顶部核心指标卡、`◀ 上一步 / 下一步 ▶` 与流程图点击联动展示。*
+
+### 外部 Agent 自主联动（OpenClaw / 本地 CLI / 临时在线接力）
+
+- **自包含 Connect 配对包**：在 `设置 → LLM` 点击 `＋ 导入外部 Agent` 即可自动部署 `<userData>/agent-connect/`（含 `CONNECT.md`、`pairing.json`、`mcp-config.json` 与零依赖 `mcp-server.cjs`），优先复用上次本地端口与持久化令牌；只需复制极简接入提示词发给任意源 Agent，即可由源 Agent 自主判定环境并完成注册。
+- **三分类接入与隔离**：
+  - **长期有效**（OpenClaw Gateway、本地非交互 CLI 如 OpenCode/Claude/Codex 或本地适配脚本、HTTP API）：持久化写入设置，支持链式启动（打开 Pi Workbench 时自动拉起未在线的网关/软件，端口已在线则跳过）。
+  - **仅本次临时有效**（`mcp-relay` 桌面端在线接力）：只存内存不写入长久配置、重启自动清除；内置 `RELAY_GRACE_WAIT` 60 秒宽限挂起队列，源端短暂重连期间发消息不直接报错。
+  - **无法导入**：既无法挂载本地 MCP 又无法访问 `127.0.0.1` 的纯封闭环境，前置过滤阶段直接停止并告知原因。
+- **真实四维能力实测与按模式过滤**：注册后后台自动实测 `普通聊天`、`工作流`（会话隔离与并发）、`工作台工具`（需真实触发 `workbench_probe_ping` MCP 回调）与 `识图`；聊天框与工作台下拉菜单会按当前模式自动过滤不支持的 Agent，并在跨引擎切换时自动附带 `DATA` 边界交接上下文。
+- **模型目录刷新与批量管理**：支持 CLI `modelsCommand`（如 `opencode models`）或 MCP `pi_workbench_update_models` 同步/刷新真实模型列表；设置页提供复选框勾选、`全选外部 Agent` 与一键批量删除。
+
+![导入外部 Agent 生成 Connect 配对包与极简提示词](docs/images/agent-setup-pairing.png)
+
+*第 1 步：点击 `＋ 导入外部 Agent` 生成本地 Connect 包并复制极简提示词或 MCP 配置。*
+
+![外部 Agent 能力矩阵、临时接力分区与勾选批量删除](docs/images/agent-settings-overview.png)
+
+*第 2 步：源 Agent 自主接入后自动完成四维能力实测与界面刷新，支持长久引擎与临时接力分区管理及勾选批量删除。*
+
 ### 工作台目录与上下文面板
 
 ![本地工作台目录](docs/images/workbench-catalog.png)
@@ -45,7 +69,15 @@
 
 *上下文查看与审查面板：按系统规则、工作台能力、历史与记忆分块查看当前上下文，支持独立开关与重建。*
 
-## 运行与测试
+## 下载安装与运行
+
+### 方式一：Windows 安装包（推荐，普通用户开箱即用）
+
+1. 前往 [GitHub Releases v0.2.14](https://github.com/fangyubao/pi-agent/releases/tag/v0.2.14) 下载 **`Pi-Workbench-0.2.14-Setup.exe`**；
+2. 双击安装即可使用（已内置 Node 24.19.0 与 Pi 1.5.0，无需单独配置 Node 或 Python 环境）；
+3. 安装后在桌面右上角「设置 → LLM」配置 API Key，或点击 `＋ 导入外部 Agent` 接入 OpenClaw / OpenCode / MCP 外部 Agent。
+
+### 方式二：源码运行与构建（开发者）
 
 依赖和内置 Pi 运行时准备好就能直接跑：
 
@@ -62,6 +94,14 @@
 打 Windows 安装包（输出在 `dist/`）：
 
     npm run dist
+
+## 0.2.14 更新
+
+- 新增外部 Agent 自包含配对包（`agent-connect/`）与极简提示词接入，支持 OpenClaw Gateway、`external-cli`（OpenCode/Claude/Codex）与 `mcp-relay` 在线接力。
+- 新增真实四维能力探测（对话、工作流并发隔离、`workbench_probe_ping` 工作台工具、识图）、按模式自动过滤下拉菜单与跨引擎 `DATA` 边界交接上下文。
+- 新增外部 Agent 三分类策略（长期持久化 vs `mcp-relay` 仅当前会话临时有效）、`RELAY_GRACE_WAIT` 60 秒挂起队列、重启端口/令牌复用、链式启动与设置页勾选批量删除。
+- 新增工作流提示词精炼结构化约束、顶部核心指标卡与默认「单步交互演示」HTML 视图。
+- 新增 Pi Workbench 暖赤陶 `π` 品牌图标（`build/icon.ico` / `icon.png` / `icon.svg`）并发布 Windows 安装包。
 
 ## 0.2.12 聊天切换与后台响应
 
