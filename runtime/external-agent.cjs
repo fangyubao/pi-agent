@@ -2,6 +2,7 @@
 const fs = require('node:fs/promises');
 const fsSync = require('node:fs');
 const http = require('node:http');
+const net = require('node:net');
 const os = require('node:os');
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -941,6 +942,44 @@ async function listAgentModels(cfg, { relayDispatch, timeoutMs = 20000, signal }
   return null;
 }
 
+async function isEndpointReachable(rawUrl, timeoutMs = 800) {
+  const input = String(rawUrl || '').trim();
+  if (!input) return false;
+  let uri;
+  try { uri = new URL(input); } catch { return false; }
+  const port = Number(uri.port) || (uri.protocol === 'https:' || uri.protocol === 'wss:' ? 443 : 80);
+  const host = uri.hostname || '127.0.0.1';
+  return new Promise(resolve => {
+    const sock = net.connect({ host, port });
+    const done = ok => { sock.destroy(); resolve(ok); };
+    sock.setTimeout(Math.max(200, timeoutMs), () => done(false));
+    sock.once('connect', () => done(true));
+    sock.once('error', () => done(false));
+  });
+}
+
+async function launchAgentProcess(cfg, { spawnImpl = spawn, isReachableImpl = isEndpointReachable } = {}) {
+  const cmd = String(cfg?.launchCommand || '').trim();
+  if (!cmd) return { launched: false, reason: 'no-launch-command' };
+  if (cfg?.baseUrl && await isReachableImpl(cfg.baseUrl)) {
+    return { launched: false, reason: 'already-reachable' };
+  }
+  const args = parseArgsList(cfg?.launchArgs);
+  const run = resolveCommand(resolveCliExecutable(cmd), args);
+  const env = { ...process.env };
+  delete env.ELECTRON_RUN_AS_NODE;
+  const child = spawnImpl(run.file, run.args, {
+    env,
+    cwd: cfg?.cwd || process.cwd(),
+    detached: true,
+    stdio: 'ignore',
+    windowsHide: !/\.exe$/i.test(run.file),
+    windowsVerbatimArguments: run.windowsVerbatimArguments
+  });
+  if (typeof child?.unref === 'function') child.unref();
+  return { launched: true, pid: child?.pid || 0 };
+}
+
 module.exports = {
   normalizeWsUrl,
   openClawExchange,
@@ -952,5 +991,7 @@ module.exports = {
   parseArgsList,
   splitCommandLine,
   parseModelIds,
-  listAgentModels
+  listAgentModels,
+  isEndpointReachable,
+  launchAgentProcess
 };

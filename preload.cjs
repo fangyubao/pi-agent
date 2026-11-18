@@ -64,6 +64,7 @@ contextBridge.exposeInMainWorld('piDesktop', Object.freeze({
     startPairing: input => ipcRenderer.invoke('provider:pairing-start', input),
     pairingStatus: () => ipcRenderer.invoke('provider:pairing-status'),
     openConnectDir: () => ipcRenderer.invoke('provider:open-connect-dir'),
+    launchAgent: input => ipcRenderer.invoke('provider:launch-agent', input),
     onUpdated: callback => {
       const listener = (_event, payload) => callback(payload);
       ipcRenderer.on('provider:updated', listener);

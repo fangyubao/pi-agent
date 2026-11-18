@@ -166,6 +166,9 @@ window.PiProviderSettings = (() => {
           promptMode: promptEl?.value === 'arg' ? 'arg' : 'stdin',
           mcpSupport: transport === 'openclaw-gateway' ? 'none' : (transport === 'mcp-relay' ? 'mcp-config' : (mcpEl?.value === 'none' ? 'none' : 'mcp-config')),
           capabilities: nextCapabilities,
+          launchCommand: root.querySelector('#provider-launch-command')?.value.trim() || '',
+          launchArgs: parseArgsInput(root.querySelector('#provider-launch-args')?.value || ''),
+          autoLaunch: Boolean(root.querySelector('#provider-auto-launch')?.checked),
           apiKey,
           models: uniqueModels,
           model: chosenModel,
@@ -334,12 +337,16 @@ window.PiProviderSettings = (() => {
         '<div class="provider-grid">' +
         '<label class="dialog-label">显示名称<input class="dialog-input" id="provider-name" value="' + esc(p.name) + '" required maxlength="60"></label>' +
         '<label class="dialog-label">接入协议<select class="dialog-input" id="provider-agent-transport">' + capsApi().AGENT_TRANSPORTS.map(x => '<option value="' + x.id + '"' + (transport === x.id ? ' selected' : '') + '>' + esc(x.label) + '</option>').join('') + '</select><small class="settings-note" id="provider-kind-hint">' + esc(tMeta.hint) + '</small></label>' +
-        endpointFields + '</div>' +
+        endpointFields +
+        '<label class="dialog-label">链式启动命令 / 软件路径（可选）<input class="dialog-input" id="provider-launch-command" value="' + esc(p.launchCommand || '') + '" placeholder="例如 openclaw 或软件 .exe 路径"></label>' +
+        '<label class="dialog-label">链式启动参数（可选，空格分隔）<input class="dialog-input" id="provider-launch-args" value="' + esc(formatArgsInput(p.launchArgs)) + '" placeholder="例如 gateway run"></label>' +
+        '</div>' +
+        '<label class="provider-active"><input type="checkbox" id="provider-auto-launch" ' + (p.autoLaunch ? 'checked' : '') + '> 打开 Pi Workbench 时自动链式启动此 Agent（服务已在线时跳过）</label>' +
         modelSlotsHtml(p, all, chosen, '目标 Agent ID / 路由名 · 最多 4 个') +
         effortHiddenSlots +
         '<label class="dialog-label">添加 Agent ID / 模型名<div class="provider-manual"><input class="dialog-input" id="provider-manual-model" placeholder="例如 main 或 coder"><button type="button" class="button" id="provider-import">加入可选列表</button></div></label>' +
         '<label class="provider-active"><input type="checkbox" id="provider-active" ' + (config.profileId === p.id || !profiles.length || isDraft ? 'checked' : '') + '> 保存后设为当前使用</label>' +
-        '<div class="provider-actions"><button class="button primary" type="submit">检测并保存</button><button class="button" id="provider-test" type="button">实测全部能力</button><button class="button danger" id="provider-delete" type="button" ' + (draft || profiles.length < 2 ? 'disabled' : '') + '>删除此 Agent</button></div>' +
+        '<div class="provider-actions"><button class="button primary" type="submit">检测并保存</button><button class="button" id="provider-test" type="button">实测全部能力</button><button class="button" id="provider-launch-btn" type="button"' + (p.launchCommand ? '' : ' disabled') + '>立即启动 Agent</button><button class="button danger" id="provider-delete" type="button" ' + (draft || profiles.length < 2 ? 'disabled' : '') + '>删除此 Agent</button></div>' +
         '</details>';
 
       return '<form id="provider-form">' +
@@ -582,6 +589,23 @@ window.PiProviderSettings = (() => {
 
       const probeBtn = root.querySelector('#provider-probe-caps');
       if (probeBtn) probeBtn.onclick = () => { void runCapabilityProbe(); };
+
+      const launchBtn = root.querySelector('#provider-launch-btn');
+      if (launchBtn) launchBtn.onclick = async () => {
+        const label = root.querySelector('#provider-status');
+        launchBtn.disabled = true;
+        if (label) label.textContent = '正在启动外部 Agent…';
+        try {
+          const res = await window.PiProviderManager.launchAgent(readForm());
+          if (!root.isConnected || root.querySelector('#provider-launch-btn') !== launchBtn) return;
+          if (!res?.ok) throw new Error(res?.error || '启动失败');
+          label.textContent = res.launched ? ('已拉起外部 Agent 进程' + (res.pid ? ' (PID ' + res.pid + ')' : '')) : (res.reason === 'already-reachable' ? '检测到外部 Agent 端口已在线，无需重复启动' : '未启动：' + (res.reason || ''));
+        } catch (err) {
+          if (label?.isConnected) label.textContent = '启动失败：' + err.message;
+        } finally {
+          if (launchBtn.isConnected) launchBtn.disabled = false;
+        }
+      };
 
       const testBtn = root.querySelector('#provider-test');
       if (testBtn) testBtn.onclick = async () => {

@@ -71,6 +71,7 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '## 三、部署与自主接入步骤',
     '### 路径 A（推荐，可脱离原窗口长期使用）：自检自身入口并上报配置',
     '若你具备本地非交互 CLI、网关或可用模型 API（哪怕协议不完全标准，也可先写一个轻量本地适配器脚本包装成标准 CLI 或 `127.0.0.1` OpenAI 兼容服务），**请优先走路径 A**，不要走路径 B 轮询；严禁通过模拟键鼠或抓取客户端私有登录态去强行驱动桌面界面。',
+    '若你明确知道自己的网关服务或客户端可执行文件路径（例如 `openclaw` 或本机桌面端 `.exe`），可在注册 JSON 中额外附上 `"launchCommand"` 与 `"launchArgs"`（供用户在 Pi Workbench 设置里一键开启“随 Pi 启动自动拉起”）。',
     '请按你自身的实际形态选择最合适的一种配置提交：',
     '1. **OpenClaw 网关**：读取本机 OpenClaw 配置获取 WebSocket 地址与 Token，提交：',
     '```json',
@@ -376,6 +377,8 @@ function createPairingServer({
           promptMode: { type: 'string', enum: ['stdin', 'arg'] },
           mcpSupport: { type: 'string', enum: ['mcp-config', 'none'] },
           modelsCommand: { type: 'string', description: '列出本 Agent 可用模型的命令，如 "opencode models"（可选，便于自动刷新）' },
+          launchCommand: { type: 'string', description: '可选：用于随 Pi Workbench 链式启动该网关或客户端的可执行文件路径/命令' },
+          launchArgs: { type: 'array', items: { type: 'string' }, description: '可选：链式启动参数' },
           models: { type: 'array', items: { type: 'string' }, description: '你当前真实可用的全部模型 ID，必须如实枚举，不要编造' }
         },
         required: ['name']

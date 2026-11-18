@@ -48,9 +48,14 @@
     if (api?.openConnectDir) return api.openConnectDir();
     return { ok: false, error: '浏览器预览模式不支持打开本地目录' };
   }
+  async function launchAgent(input) {
+    const api = desktop();
+    if (api?.launchAgent) return api.launchAgent(input);
+    return { ok: false, error: '浏览器预览模式不支持链式启动外部 Agent' };
+  }
   function onUpdated(callback) {
     const api = desktop();
     return api?.onUpdated ? api.onUpdated(callback) : () => {};
   }
-  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport, startPairing, pairingStatus, openConnectDir, onUpdated });
+  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport, startPairing, pairingStatus, openConnectDir, launchAgent, onUpdated });
 })();

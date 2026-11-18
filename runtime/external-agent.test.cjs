@@ -226,3 +226,29 @@ test('接力模型目录与选定模型传递', async () => {
   await ext.exchange(cfg,{user:'hello',relayDispatch:async(id,req)=>{assert.equal(id,'relay');request=req;return {text:'ok'};}});
   assert.equal(request.model,'model-b');
 });
+
+test('链式启动外部 Agent：端口已在线时跳过，不在线时按配置 detached 启动', async () => {
+  const skipped = await ext.launchAgentProcess(
+    { baseUrl: 'ws://127.0.0.1:18789', launchCommand: 'openclaw', launchArgs: ['gateway', 'run'] },
+    { isReachableImpl: async () => true, spawnImpl: () => { throw new Error('should not spawn'); } }
+  );
+  assert.equal(skipped.launched, false);
+  assert.equal(skipped.reason, 'already-reachable');
+
+  let spawned = null;
+  let unreffed = false;
+  const launched = await ext.launchAgentProcess(
+    { baseUrl: 'ws://127.0.0.1:18789', launchCommand: 'openclaw', launchArgs: ['gateway', 'run'] },
+    {
+      isReachableImpl: async () => false,
+      spawnImpl: (file, args, opts) => {
+        spawned = { file, args, opts };
+        return { pid: 43210, unref: () => { unreffed = true; } };
+      }
+    }
+  );
+  assert.equal(launched.launched, true);
+  assert.equal(launched.pid, 43210);
+  assert.equal(unreffed, true);
+  assert.equal(spawned.opts.detached, true);
+});

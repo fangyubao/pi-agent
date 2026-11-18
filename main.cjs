@@ -137,6 +137,9 @@ function publicProfile(profile = {}) {
     baseUrl: profile.baseUrl !== undefined ? profile.baseUrl : defaultBase,
     command: String(profile.command || ''),
     modelsCommand: String(profile.modelsCommand || ''),
+    launchCommand: String(profile.launchCommand || ''),
+    launchArgs: Array.isArray(profile.launchArgs) ? profile.launchArgs.slice(0, 24) : [],
+    autoLaunch: Boolean(profile.autoLaunch),
     discoveredModels: Array.isArray(profile.discoveredModels) ? profile.discoveredModels.slice(0, 200) : [],
     args: Array.isArray(profile.args) ? profile.args.slice(0, 24) : [],
     promptMode: profile.promptMode === 'arg' ? 'arg' : 'stdin',
@@ -216,6 +219,9 @@ async function effectiveProvider(input = {}) {
     baseUrl: normalizedBase,
     command: String(input.command !== undefined ? input.command : (selected.command || '')),
     modelsCommand: String(input.modelsCommand !== undefined ? input.modelsCommand : (selected.modelsCommand || '')),
+    launchCommand: String(input.launchCommand !== undefined ? input.launchCommand : (selected.launchCommand || '')),
+    launchArgs: Array.isArray(input.launchArgs) ? input.launchArgs.slice(0, 24) : (Array.isArray(selected.launchArgs) ? selected.launchArgs : []),
+    autoLaunch: input.autoLaunch !== undefined ? Boolean(input.autoLaunch) : Boolean(selected.autoLaunch),
     discoveredModels: Array.isArray(selected.discoveredModels) ? selected.discoveredModels.slice(0, 200) : [],
     args: Array.isArray(input.args) ? input.args.slice(0, 24) : (Array.isArray(selected.args) ? selected.args : []),
     promptMode: (input.promptMode || selected.promptMode) === 'arg' ? 'arg' : 'stdin',
@@ -1078,6 +1084,9 @@ if(primaryInstance)app.whenReady().then(() => {
       baseUrl: cleanUrl(rawUrl, isExternal),
       command: isExternal ? String(input.command !== undefined ? input.command : (previous.command || '')) : '',
       modelsCommand: isExternal ? String(input.modelsCommand !== undefined ? input.modelsCommand : (previous.modelsCommand || '')).slice(0, 300) : '',
+      launchCommand: isExternal ? String(input.launchCommand !== undefined ? input.launchCommand : (previous.launchCommand || '')).slice(0, 300) : '',
+      launchArgs: isExternal ? (Array.isArray(input.launchArgs) ? input.launchArgs.map(x => String(x || '').slice(0, 200)).slice(0, 24) : (typeof input.launchArgs === 'string' && extLib ? extLib.parseArgsList(input.launchArgs).slice(0, 24) : (Array.isArray(previous.launchArgs) ? previous.launchArgs : []))) : [],
+      autoLaunch: isExternal ? (input.autoLaunch !== undefined ? Boolean(input.autoLaunch) : Boolean(previous.autoLaunch)) : false,
       args: isExternal ? parsedArgs : [],
       promptMode: isExternal ? ((input.promptMode || previous.promptMode) === 'arg' ? 'arg' : 'stdin') : 'stdin',
       mcpSupport: isExternal ? ((input.mcpSupport || previous.mcpSupport) === 'none' ? 'none' : 'mcp-config') : 'none',
@@ -1272,6 +1281,8 @@ if(primaryInstance)app.whenReady().then(() => {
           baseUrl,
           command: external && transport === 'external-cli' ? String(payload.command || '').trim() : '',
           modelsCommand: external && transport === 'external-cli' ? String(payload.modelsCommand || '').trim().slice(0, 300) : '',
+          launchCommand: external ? String(payload.launchCommand || '').trim().slice(0, 300) : '',
+          launchArgs: external ? externalAgent.parseArgsList(payload.launchArgs).slice(0, 24) : [],
           args: external && transport === 'external-cli' ? externalAgent.parseArgsList(payload.args).slice(0, 24) : [],
           promptMode: payload.promptMode === 'arg' ? 'arg' : 'stdin',
           mcpSupport: payload.mcpSupport === 'none' ? 'none' : 'mcp-config',
@@ -1322,6 +1333,9 @@ if(primaryInstance)app.whenReady().then(() => {
             baseUrl: candidate.baseUrl,
             command: candidate.command,
             modelsCommand: candidate.modelsCommand,
+            launchCommand: candidate.launchCommand || prev.launchCommand || '',
+            launchArgs: candidate.launchArgs?.length ? candidate.launchArgs : (prev.launchArgs || []),
+            autoLaunch: prev.autoLaunch === true,
             discoveredModels: allModels.length ? allModels : (prev.discoveredModels || []),
             args: candidate.args,
             promptMode: candidate.promptMode,
@@ -1424,6 +1438,15 @@ if(primaryInstance)app.whenReady().then(() => {
       const err = info.bundleDir ? await shell.openPath(info.bundleDir) : '目录未初始化';
       return err ? { ok: false, error: err } : { ok: true, path: info.bundleDir };
     } catch (error) { return { ok: false, error: error.message }; }
+  });
+  ipcMain.handle('provider:launch-agent', async (event, input = {}) => {
+    try {
+      checkShell(event);
+      const cfg = await effectiveProvider(input);
+      if (!cfg.launchCommand) return { ok: false, error: '未配置链式启动命令或软件路径' };
+      const res = await externalAgent.launchAgentProcess(cfg);
+      return { ok: true, ...res };
+    } catch (error) { return { ok: false, error: agentRecovery.redact(error.message) }; }
   });
   ipcMain.handle('provider:parse-agent-import', async (event, input = {}) => {
     try {
@@ -1849,7 +1872,19 @@ if(primaryInstance)app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
   Menu.setApplicationMenu(null);
   createWindow();
-  setTimeout(() => { void getPairingServer().startSession({ rotateToken: false }).catch(() => {}); }, 200);
+  setTimeout(() => {
+    void (async () => {
+      await getPairingServer().startSession({ rotateToken: false }).catch(() => {});
+      try {
+        const stored = await readProviderConfig();
+        for (const prof of providerProfiles(stored)) {
+          if (providerCapabilities.isExternalAgent(prof) && prof.autoLaunch && prof.launchCommand) {
+            await externalAgent.launchAgentProcess(prof).catch(() => {});
+          }
+        }
+      } catch { /* 启动链式拉起失败不影响主界面启动 */ }
+    })();
+  }, 200);
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
