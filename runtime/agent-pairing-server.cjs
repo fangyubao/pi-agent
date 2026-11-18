@@ -70,6 +70,7 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '',
     '## 三、部署与自主接入步骤',
     '### 路径 A（推荐，可脱离原窗口长期使用）：自检自身入口并上报配置',
+    '若你具备本地非交互 CLI、网关或可用模型 API（哪怕协议不完全标准，也可先写一个轻量本地适配器脚本包装成标准 CLI 或 `127.0.0.1` OpenAI 兼容服务），**请优先走路径 A**，不要走路径 B 轮询；严禁通过模拟键鼠或抓取客户端私有登录态去强行驱动桌面界面。',
     '请按你自身的实际形态选择最合适的一种配置提交：',
     '1. **OpenClaw 网关**：读取本机 OpenClaw 配置获取 WebSocket 地址与 Token，提交：',
     '```json',
@@ -91,14 +92,14 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '```json',
     '{"name":"当前 MCP Agent","agentTransport":"mcp-relay","models":["你当前正在使用的真实模型ID"]}',
     '```',
-    '3. **关键：拿到返回的 `profileId` 后不要结束本轮回复！** 请立刻进入持续接单循环（否则 Pi Workbench 超过 65 秒无轮询会判定离线并请求失败）：',
-    '   - 调用 `pi_workbench_await_task(profileId, timeoutMs: 25000)` 挂起等待任务；',
+    '3. **关键：拿到返回的 `profileId` 后不要结束本轮回复！** 请立刻进入持续接单循环（否则 Pi Workbench 超过宽限期无轮询会判定离线并请求失败）：',
+    '   - 调用 `pi_workbench_await_task(profileId, timeoutMs: 55000)` 挂起等待任务；',
     '   - 若返回 `idle: true`（暂无任务），**不要向用户回复并结束对话**，立即再次调用 `pi_workbench_await_task` 保持在线；',
     '   - 若返回 `idle: false` 接到 `task`：按 `task.system` 与 `task.user` 执行（工作台模式可直接调用 `workbench_action`；若 `task.model` 非空且与你当前模型不同而你无法切换，必须以 `isError: true` 回传原因），完成后调用 `pi_workbench_submit_result`，随后**继续调用 `pi_workbench_await_task`** 接下一单；',
     '   - 仅当用户明确叫停或宿主工具调用次数达到上限被迫暂停时，才向用户说明“已暂停接力轮询，如需继续派单请回复让我继续接单”。',
     '',
     '### 发送方式二选一',
-    '- **MCP 工具调用**：挂载本目录 `mcp-config.json` 后调用 `pi_workbench_register_agent`；',
+    '- **MCP 工具调用**：挂载本目录 `mcp-config.json` 后调用 `pi_workbench_register_agent`；若通过 HTTP 客户端直连 MCP，**必须使用 `POST /mcp` 发送 JSON-RPC，禁止对 `/mcp` 发 `GET`（`GET /mcp` 为 SSE 长连接，会一直挂起）**；',
     `- **HTTP POST**：携带 \`Authorization: Bearer ${token}\` 与 \`Content-Type: application/json\` POST 到 \`${registerUrl}\`。`,
     '',
     '## 三点五、模型列表（必须如实上报，否则用户在 Pi Workbench 里选不到模型）',
@@ -180,8 +181,11 @@ function createPairingServer({
 } = {}) {
   let server = null;
   let port = 0;
+  let preferredPort = 0;
   let activeBundleDir = String(bundleDir || '');
   let pairingToken = crypto.randomBytes(16).toString('hex');
+  let persistedLoaded = false;
+  const sseResponses = new Set();
   let state = {
     status: 'idle',
     startedAt: null,
@@ -192,6 +196,18 @@ function createPairingServer({
     capabilities: null,
     error: ''
   };
+
+  async function loadPersistedPairing() {
+    if (persistedLoaded || !activeBundleDir) return;
+    persistedLoaded = true;
+    try {
+      const raw = await fs.readFile(path.join(activeBundleDir, 'pairing.json'), 'utf8');
+      const saved = JSON.parse(raw);
+      const savedPort = Number(saved?.port);
+      if (Number.isInteger(savedPort) && savedPort >= 1024 && savedPort <= 65535) preferredPort = savedPort;
+      if (typeof saved?.token === 'string' && saved.token.trim().length >= 16) pairingToken = saved.token.trim();
+    } catch { /* 首次启动尚无 pairing.json，使用新令牌与随机端口 */ }
+  }
 
   const relays = new Map();
   function getRelay(profileId) {
@@ -208,25 +224,41 @@ function createPairingServer({
     return r;
   }
 
+  function getRelayState(profileId) {
+    const r = relays.get(String(profileId || ''));
+    if (!r) return 'RELAY_OFFLINE';
+    if (r.waiters.length > 0 || (Date.now() - (r.lastSeenAt || 0) <= 65000)) return 'RELAY_ONLINE';
+    if (r.queue.length > 0) return 'RELAY_GRACE_WAIT';
+    return 'RELAY_OFFLINE';
+  }
+
+  function markTaskPickedUp(task) {
+    task.pickedUp = true;
+    if (task.graceTimer) { clearTimeout(task.graceTimer); task.graceTimer = null; }
+  }
+
   function flushRelayQueue(profileId) {
     const r = getRelay(profileId);
     while (r.queue.length && r.waiters.length) {
       const task = r.queue.shift();
+      markTaskPickedUp(task);
       const waiter = r.waiters.shift();
       waiter(task);
     }
   }
 
-  function awaitRelayTask(profileId, timeoutMs = 20000) {
+  function awaitRelayTask(profileId, timeoutMs = 50000) {
     const r = touchRelay(profileId);
     if (r.queue.length) {
       const task = r.queue.shift();
+      markTaskPickedUp(task);
       return Promise.resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, model: task.model || '', mode: task.mode } });
     }
     return new Promise(resolve => {
       let timer = null;
       const onTask = task => {
         clearTimeout(timer);
+        markTaskPickedUp(task);
         resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, model: task.model || '', mode: task.mode } });
       };
       r.waiters.push(onTask);
@@ -234,7 +266,7 @@ function createPairingServer({
         const idx = r.waiters.indexOf(onTask);
         if (idx >= 0) r.waiters.splice(idx, 1);
         resolve({ idle: true });
-      }, Math.max(1000, Math.min(25000, Number(timeoutMs) || 20000)));
+      }, Math.max(1000, Math.min(55000, Number(timeoutMs) || 50000)));
       timer.unref?.();
     });
   }
@@ -245,17 +277,16 @@ function createPairingServer({
     if (!entry) throw new Error('找不到对应的待回传任务，可能已超时或已完成：' + String(requestId || ''));
     r.inFlight.delete(String(requestId || ''));
     clearTimeout(entry.timer);
+    if (entry.graceTimer) { clearTimeout(entry.graceTimer); entry.graceTimer = null; }
     entry.signal?.removeEventListener('abort', entry.onAbort);
     if (isError) entry.reject(new Error(String(error || text || 'MCP 接力执行失败')));
     else entry.resolve({ text: String(text || ''), usage: null });
     return { ok: true, requestId };
   }
 
-  async function dispatchRelayTask(profileId, { system = '', user = '', model = '', mode = 'chat', timeoutMs = 180000, signal } = {}) {
+  async function dispatchRelayTask(profileId, { system = '', user = '', model = '', mode = 'chat', timeoutMs = 180000, graceWaitMs = 60000, signal } = {}) {
     const r = getRelay(profileId);
-    if (Date.now() - (r.lastSeenAt || 0) > 65000 && r.waiters.length === 0) {
-      throw new Error('MCP 在线接力连接已离线，请在源 Agent 中确认已连接 Pi Workbench MCP 并处于轮询接单状态');
-    }
+    const onlineNow = r.waiters.length > 0 || (Date.now() - (r.lastSeenAt || 0) <= 65000);
     const requestId = 'rly_' + crypto.randomBytes(8).toString('hex');
     return new Promise((resolve, reject) => {
       let settled = false;
@@ -263,6 +294,7 @@ function createPairingServer({
         if (settled) return false;
         settled = true;
         clearTimeout(timer);
+        if (taskObj.graceTimer) { clearTimeout(taskObj.graceTimer); taskObj.graceTimer = null; }
         signal?.removeEventListener('abort', onAbort);
         const qi = r.queue.findIndex(x => x.requestId === requestId);
         if (qi >= 0) r.queue.splice(qi, 1);
@@ -276,10 +308,11 @@ function createPairingServer({
       if (signal?.aborted) { onAbort(); return; }
       signal?.addEventListener('abort', onAbort, { once: true });
 
+      const effectiveTimeout = Math.max(5000, Number(timeoutMs) || 180000);
       const timer = setTimeout(() => {
         if (!cleanup()) return;
         reject(new Error('MCP 在线接力响应超时，源 Agent 未及时回传结果'));
-      }, Math.max(5000, Number(timeoutMs) || 180000));
+      }, effectiveTimeout);
 
       const taskObj = {
         requestId,
@@ -287,12 +320,25 @@ function createPairingServer({
         user: String(user || ''),
         model: String(model || ''),
         mode: String(mode || 'chat'),
+        pickedUp: false,
+        graceTimer: null,
         resolve: val => { if (cleanup()) resolve(val); },
         reject: err => { if (cleanup()) reject(err); },
         timer,
         signal,
         onAbort
       };
+
+      if (!onlineNow) {
+        // 状态机 RELAY_GRACE_WAIT：暂离线时先挂起等待源 Agent 重新轮询上线，超时再报错
+        const waitLimit = Math.max(50, Math.min(effectiveTimeout, Number(graceWaitMs) || 60000));
+        taskObj.graceTimer = setTimeout(() => {
+          if (taskObj.pickedUp || !cleanup()) return;
+          reject(new Error('MCP 在线接力连接已离线（等待源 Agent 接单超时），请在源窗口回复「继续接单」或确认已连接 Pi Workbench MCP'));
+        }, waitLimit);
+        taskObj.graceTimer.unref?.();
+      }
+
       r.inFlight.set(requestId, taskObj);
       r.queue.push(taskObj);
       flushRelayQueue(profileId);
@@ -498,7 +544,8 @@ function createPairingServer({
         });
         const hb = setInterval(() => { try { res.write(': ping\n\n'); } catch {} }, 15000);
         hb.unref?.();
-        req.on('close', () => clearInterval(hb));
+        sseResponses.add(res);
+        req.on('close', () => { clearInterval(hb); sseResponses.delete(res); });
         return;
       }
 
@@ -576,6 +623,21 @@ function createPairingServer({
       sendJson(404, { ok: false, error: 'Not found' });
     });
 
+    await loadPersistedPairing();
+    if (preferredPort > 0) {
+      try {
+        await new Promise((resolve, reject) => {
+          const onErr = err => reject(err);
+          server.once('error', onErr);
+          server.listen(preferredPort, '127.0.0.1', () => {
+            server.removeListener('error', onErr);
+            port = server.address().port;
+            resolve();
+          });
+        });
+        return port;
+      } catch { /* 上次端口被占用，自动回退到随机空闲端口 */ }
+    }
     await new Promise((resolve, reject) => {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', () => {
@@ -615,14 +677,23 @@ function createPairingServer({
   }
 
   async function close() {
+    for (const res of sseResponses) {
+      try { res.end(); } catch {}
+    }
+    sseResponses.clear();
     for (const r of relays.values()) {
       for (const w of r.waiters.splice(0)) w({ idle: true });
-      for (const t of r.inFlight.values()) { clearTimeout(t.timer); t.reject(new Error('服务已关闭')); }
+      for (const t of r.inFlight.values()) {
+        clearTimeout(t.timer);
+        if (t.graceTimer) { clearTimeout(t.graceTimer); t.graceTimer = null; }
+        t.reject(new Error('服务已关闭，所有外部接力连接已断开'));
+      }
       r.inFlight.clear();
       r.queue.length = 0;
     }
     if (server) {
       const s = server; server = null; port = 0;
+      s.closeAllConnections?.();
       await new Promise(resolve => s.close(() => resolve()));
     }
   }
@@ -639,6 +710,7 @@ function createPairingServer({
     markProbed,
     dispatchRelayTask,
     isRelayOnline,
+    getRelayState,
     close
   };
 }

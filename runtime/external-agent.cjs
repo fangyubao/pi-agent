@@ -527,17 +527,28 @@ async function exchange(cfg, { system = '', user = '', sessionKey, thinking, max
     return out;
   }
   if (transport === 'openclaw-gateway') {
-    return openClawExchange({
-      gatewayUrl: cfg.baseUrl,
-      token: cfg.apiKey || '',
-      agentId: cfg.model || 'main',
-      sessionKey: sessionKey || `agent:${cfg.model || 'main'}:main`,
-      prompt: fullPrompt,
-      thinking: thinking || cfg.effort || 'off',
-      timeoutMs,
-      signal,
-      onDelta
-    });
+    const runOnce = () => {
+      let emitted = false;
+      return openClawExchange({
+        gatewayUrl: cfg.baseUrl,
+        token: cfg.apiKey || '',
+        agentId: cfg.model || 'main',
+        sessionKey: sessionKey || `agent:${cfg.model || 'main'}:main`,
+        prompt: fullPrompt,
+        thinking: thinking || cfg.effort || 'off',
+        timeoutMs,
+        signal,
+        onDelta: d => { emitted = true; onDelta?.(d); }
+      }).catch(err => { err._emittedDelta = emitted; throw err; });
+    };
+    try {
+      return await runOnce();
+    } catch (err) {
+      if (signal?.aborted || err?.name === 'AbortError' || err?._emittedDelta) throw err;
+      await new Promise(r => setTimeout(r, 300));
+      if (signal?.aborted) throw Object.assign(new Error('已停止'), { name: 'AbortError' });
+      return runOnce();
+    }
   }
   if (transport === 'external-cli') {
     return cliExchange({

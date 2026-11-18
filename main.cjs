@@ -1862,5 +1862,6 @@ let shutdownStarted=false;
 app.on('before-quit', event => {
   if(shutdownStarted)return;
   event.preventDefault();shutdownStarted=true;
+  if(activeRun){activeRun.cancelled=true;try{activeRun.abortController?.abort();}catch{}}
   Promise.allSettled([stopPiClient(),workbenchWorkers.dispose(),pairingServer?.close()]).finally(()=>app.quit());
 });

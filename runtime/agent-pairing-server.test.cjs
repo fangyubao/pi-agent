@@ -163,3 +163,53 @@ test('模型更新支持 HTTP 和 MCP，错误令牌不能更新', async () => {
     assert.equal(updates.length,2);
   } finally {await srv.close();}
 });
+
+test('重启优先复用端口与令牌，且 mcp-relay 暂离线先进入 RELAY_GRACE_WAIT 挂起等待接单', async () => {
+  const bundleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-connect-reuse-'));
+  const srv1 = createPairingServer({ bundleDir });
+  let firstPort = 0;
+  let firstToken = '';
+  try {
+    const info1 = await srv1.startSession({ rotateToken: true });
+    firstPort = info1.port;
+    firstToken = info1.token;
+  } finally {
+    await srv1.close();
+  }
+
+  const srv2 = createPairingServer({ bundleDir });
+  try {
+    const info2 = await srv2.startSession({ rotateToken: false });
+    assert.equal(info2.port, firstPort);
+    assert.equal(info2.token, firstToken);
+
+    // 1. 离线状态下发单先挂起（RELAY_GRACE_WAIT），期间源 Agent 上线轮询即可接单成功
+    const dispatchP = srv2.dispatchRelayTask('relay-grace', { user: 'ping while offline', graceWaitMs: 3000, timeoutMs: 8000 });
+    await new Promise(r => setTimeout(r, 40));
+    assert.equal(srv2.getRelayState('relay-grace'), 'RELAY_GRACE_WAIT');
+
+    const post = (url, body) => fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + info2.token },
+      body: JSON.stringify(body)
+    }).then(r => r.json());
+
+    const awaited = await post(info2.mcpUrl, { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'pi_workbench_await_task', arguments: { profileId: 'relay-grace', timeoutMs: 2000 } } });
+    const awaitData = JSON.parse(awaited.result.content[0].text);
+    assert.equal(awaitData.idle, false);
+    assert.equal(awaitData.task.user, 'ping while offline');
+
+    await post(info2.mcpUrl, { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'pi_workbench_submit_result', arguments: { profileId: 'relay-grace', requestId: awaitData.task.requestId, text: 'GRACE_RECOVERED_OK' } } });
+    const out = await dispatchP;
+    assert.equal(out.text, 'GRACE_RECOVERED_OK');
+
+    // 2. 超过宽限期仍无人接单时才报错
+    await assert.rejects(
+      () => srv2.dispatchRelayTask('relay-never', { user: 'nobody', graceWaitMs: 80, timeoutMs: 5000 }),
+      /MCP 在线接力连接已离线/
+    );
+  } finally {
+    await srv2.close();
+    fs.rmSync(bundleDir, { recursive: true, force: true });
+  }
+});
