@@ -63,13 +63,24 @@ test('任务领域自动识别与 5 档智能推荐：按领域关键词归类�
     { id: 'n1', title: '后端接口与SQL代码开发', tier: 1 },
     { id: 'n2', title: '量子矩阵方程与概率证明', tier: 3 }
   ];
+  const multiDom = LB.inferDomains({ title: '量子模拟器代码开发', prompt: '编写矩阵计算与后端接口脚本' });
+  assert.deepEqual(multiDom.domains, ['coding', 'math']);
+  assert.match(multiDom.tendency, /倾向：编程·数学推理/);
+  assert.match(multiDom.basisText, /命中/);
+
   const assignedByLeaderboard = LB.assignByDomain(nodesInput, { mode: 'leaderboard', tiers: customTiers, tiersApi: T });
   assert.equal(assignedByLeaderboard[0].category, 'coding');
   assert.equal(assignedByLeaderboard[0].model.category, 'coding');
   assert.equal(assignedByLeaderboard[0].model.model, 'qwen-2.5-coder-32b');
+  assert.match(assignedByLeaderboard[0].model.cardBasis, /倾向：编程/);
+  assert.match(assignedByLeaderboard[0].model.cardBasis, /依据：.*榜 #1/);
+  assert.ok(!assignedByLeaderboard[0].model.cardBasis.includes('难度'));
+  assert.match(assignedByLeaderboard[0].model.reason, /排名第 1/);
   assert.equal(assignedByLeaderboard[1].category, 'math');
   assert.equal(assignedByLeaderboard[1].model.category, 'math');
   assert.equal(assignedByLeaderboard[1].model.model, 'qwq-32b');
+  assert.match(assignedByLeaderboard[1].model.cardBasis, /倾向：数学推理/);
+  assert.ok(!assignedByLeaderboard[1].model.cardBasis.includes('难度'));
 
   const assignedByDifficulty = LB.assignByDomain(nodesInput, { mode: 'difficulty', tiers: customTiers, tiersApi: T });
   assert.equal(assignedByDifficulty[0].model.model, 'glm-flash');

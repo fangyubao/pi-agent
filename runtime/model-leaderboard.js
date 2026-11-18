@@ -197,22 +197,77 @@
     };
   }
 
-  // 根据任务/节点的标题、角色与指令，自动识别它属于哪个领域（编程/数学推理/科学知识/文学创意/指令遵循/综合）。
-  function inferCategory(nodeOrText) {
-    const explicit = typeof nodeOrText === 'object' && nodeOrText ? String(nodeOrText.category || '').trim().toLowerCase() : '';
-    if (CATEGORIES.some(c => c.id === explicit)) return explicit;
+  const CATEGORY_LABELS = {
+    overall: '综合',
+    coding: '编程',
+    math: '数学推理',
+    knowledge: '科学知识',
+    writing: '文学创意',
+    instruction: '指令遵循'
+  };
+
+  // 根据任务/节点的标题、角色与指令，自动识别它倾向于哪 1~2 个领域，并给出识别依据（命中关键词或职责）。
+  function inferDomains(nodeOrText) {
+    const labelToId = Object.fromEntries(Object.entries(CATEGORY_LABELS).map(([k, v]) => [v, k]));
+    const explicitList = typeof nodeOrText === 'object' && nodeOrText && Array.isArray(nodeOrText.domains)
+      ? nodeOrText.domains.map(x => String(x || '').trim().toLowerCase()).map(x => labelToId[x] || x).filter(x => CATEGORIES.some(c => c.id === x && c.id !== 'overall'))
+      : [];
+    const explicitCat = typeof nodeOrText === 'object' && nodeOrText ? String(nodeOrText.category || '').trim().toLowerCase() : '';
+    const validExplicitCat = CATEGORIES.some(c => c.id === explicitCat && c.id !== 'overall') ? explicitCat : (labelToId[explicitCat] || '');
+
     const text = (typeof nodeOrText === 'string'
       ? nodeOrText
       : [nodeOrText?.title, nodeOrText?.role, nodeOrText?.brief, nodeOrText?.prompt].map(x => String(x || '')).join(' ')
     ).toLowerCase();
-    let bestId = 'overall', bestHits = 0;
+
+    const scored = [];
     for (const cat of CATEGORIES) {
       if (cat.id === 'overall') continue;
-      let hits = 0;
-      for (const kw of cat.keywords) if (text.includes(kw)) hits++;
-      if (hits > bestHits) { bestHits = hits; bestId = cat.id; }
+      const hits = [];
+      for (const kw of cat.keywords) {
+        if (text.includes(kw)) hits.push(kw);
+      }
+      if (hits.length > 0) scored.push({ id: cat.id, count: hits.length, hits });
     }
-    return bestId;
+    scored.sort((a, b) => b.count - a.count);
+
+    const domains = [...new Set([
+      ...explicitList,
+      ...(validExplicitCat ? [validExplicitCat] : []),
+      ...scored.map(s => s.id)
+    ])].slice(0, 2);
+
+    if (!domains.length) {
+      const roleText = typeof nodeOrText === 'object' && nodeOrText ? String(nodeOrText.role || '') : '';
+      if (/工程|开发|架构|编程|代码/.test(roleText)) domains.push('coding');
+      else if (/调研|分析|研究|顾问|专家/.test(roleText)) domains.push('knowledge');
+      else if (/撰稿|编辑|写作|文案|策划/.test(roleText)) domains.push('writing', 'instruction');
+      else domains.push('overall');
+    }
+
+    const primary = domains[0] || 'overall';
+    const labels = domains.map(id => CATEGORY_LABELS[id] || '综合');
+    const keywords = [...new Set(scored.flatMap(s => s.hits))].slice(0, 4);
+    const tendency = '倾向：' + labels.join('·');
+    const explicitReason = typeof nodeOrText === 'object' && nodeOrText && nodeOrText.reason ? String(nodeOrText.reason).trim() : '';
+    const basisText = explicitReason
+      || (keywords.length
+        ? '命中「' + keywords.slice(0, 3).join('、') + '」，倾向 ' + labels.join(' + ') + ' 领域'
+        : '根据职责「' + (typeof nodeOrText === 'object' && nodeOrText ? (nodeOrText.role || nodeOrText.title || '综合步骤') : '综合步骤') + '」，倾向 ' + labels.join(' + ') + ' 领域');
+
+    return {
+      domains,
+      primary,
+      labels,
+      tendency,
+      keywords,
+      basisText
+    };
+  }
+
+  // 根据任务/节点的标题、角色与指令，自动识别它的主领域（兼容单领域调用）。
+  function inferCategory(nodeOrText) {
+    return inferDomains(nodeOrText).primary;
   }
 
   // 根据排行榜为当前拥有的所有工作流可用模型自动推荐 1~5 档（从轻快高性价比到最强旗舰）。
@@ -241,22 +296,13 @@
     });
   }
 
-  const CATEGORY_LABELS = {
-    overall: '综合',
-    coding: '编程',
-    math: '数学推理',
-    knowledge: '科学知识',
-    writing: '文学创意',
-    instruction: '指令遵循'
-  };
-
   function difficultyNum(tier) {
     if (Number.isInteger(tier) && tier >= 1 && tier <= 5) return tier;
     return { light: 1, standard: 3, strong: 5 }[tier] || 3;
   }
 
   // 为工作流节点和多子智能体分配最匹配的模型：
-  // - mode === 'leaderboard'（默认）：按节点所属领域（编程、数学推理、科学知识、文学创意、指令遵循、综合）的权威排行榜得分直接选出该领域排名第 1 的自有模型；
+  // - mode === 'leaderboard'（默认）：自动分析节点倾向的 1~2 个专业领域（编程、数学推理、科学知识、文学创意、指令遵循、综合），按多领域加权排行榜得分直接选出第 1 名专长模型，并生成明确的选择依据（cardBasis / reason）；
   // - mode === 'difficulty'（手动切换）：按节点难度（1~5）严格对应 5 档模型或按综合得分梯度分配；
   // - 用户手动锁定的节点（source:'user'）始终保持不动。
   function assignByDomain(nodes = [], { mode = 'leaderboard', tiers = [], vendors = [], snapshot = null, tiersApi = null } = {}) {
@@ -298,8 +344,9 @@
 
     return (Array.isArray(nodes) ? nodes : []).map(n => {
       if (!n || typeof n !== 'object') return n;
-      const catId = inferCategory(n);
-      if (n.model && n.model.source === 'user') return { ...n, category: catId };
+      const dom = inferDomains(n);
+      const catId = dom.primary;
+      if (n.model && n.model.source === 'user') return { ...n, category: catId, domains: dom.domains };
       const d = difficultyNum(n.tier);
 
       if (mode === 'difficulty') {
@@ -311,6 +358,7 @@
           return {
             ...n,
             category: catId,
+            domains: dom.domains,
             model: { profileId: pick.profileId, model: pick.model, source: 'auto', tier: pick.tier }
           };
         }
@@ -321,36 +369,52 @@
           return {
             ...n,
             category: catId,
+            domains: dom.domains,
             model: { profileId: pick.profileId, model: pick.model, source: 'auto', tier: Math.max(0, d - 1) }
           };
         }
-        return { ...n, category: catId, model: null };
+        return { ...n, category: catId, domains: dom.domains, model: null };
       }
 
-      // 默认 mode === 'leaderboard'：直接按节点所属领域的排行榜排名挑选最强模型
-      // 若既未配置档位、且所有候选模型均不在排行榜中（如纯本地未收录占位模型），则保持 model: null（走主模型）
+      // 默认 mode === 'leaderboard'：按节点倾向的 1~2 个领域加权排行榜得分挑选最强模型，并附上明确选择依据
       const hasRankedModel = allCandidates.some(c => Boolean(c.entry));
       if (allCandidates.length > 0 && (hasRankedModel || configuredTiers.length > 0)) {
         const pool = hasRankedModel ? allCandidates : configuredTiers;
+        const weightedScore = item => dom.domains.length >= 2
+          ? (scoreIn(item, dom.domains[0]) * 0.7 + scoreIn(item, dom.domains[1]) * 0.3)
+          : scoreIn(item, catId);
         const best = [...pool].sort((a, b) =>
+          (weightedScore(b) - weightedScore(a)) ||
           (scoreIn(b, catId) - scoreIn(a, catId)) ||
           (overallOf(b) - overallOf(a)) ||
           (Math.abs(hintOf(a) - d) - Math.abs(hintOf(b) - d))
         )[0];
+        const domainTitle = dom.labels.join('+');
+        const primaryScore = scoreIn(best, catId);
+        const cardBasis = best.entry
+          ? `${dom.tendency} ｜ 依据：${domainTitle}榜 #1（${primaryScore}分）`
+          : `${dom.tendency} ｜ 依据：档位${(best.tier ?? 0) + 1}映射`;
+        const reason = best.entry
+          ? `${dom.basisText}；在当前可用模型中，${best.model} 于「${domainTitle}」领域榜排名第 1（${primaryScore}分），因此自动选定`
+          : `${dom.basisText}；当前模型未收录于公开榜单，按档位 ${(best.tier ?? 0) + 1} 映射选择 ${best.model}`;
         return {
           ...n,
           category: catId,
+          domains: dom.domains,
           model: {
             profileId: best.profileId,
             model: best.model,
             source: 'auto',
             ...(Number.isInteger(best.tier) ? { tier: best.tier } : { tier: Math.max(0, d - 1) }),
-            category: catId
+            category: catId,
+            domains: dom.domains,
+            cardBasis,
+            reason
           }
         };
       }
 
-      return { ...n, category: catId, model: null };
+      return { ...n, category: catId, domains: dom.domains, model: null };
     });
   }
 
@@ -391,6 +455,7 @@
     defaultSnapshot,
     matchModel,
     describeModel,
+    inferDomains,
     inferCategory,
     recommendTiers,
     assignByDomain,

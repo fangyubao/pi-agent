@@ -37,23 +37,65 @@ window.PiWorkbenchModules.workflow = {
     const agentColor = name => AGENT_COLORS[Math.max(0, agentNames().indexOf(name)) % AGENT_COLORS.length];
     const agentModel = name => (data.agents && data.agents[name] && data.agents[name].model) || null;
 
+    function nodeDomainSummary(n, pick, modelName) {
+      const lb = window.PiModelLeaderboard;
+      const dom = lb && typeof lb.inferDomains === 'function'
+        ? lb.inferDomains(n)
+        : {
+            domains: [n.model && n.model.category || 'overall'],
+            labels: [CATEGORY_LABEL[n.model && n.model.category]?.replace(/榜$/, '') || '综合'],
+            tendency: '倾向：' + (CATEGORY_LABEL[n.model && n.model.category]?.replace(/榜$/, '') || '综合'),
+            basisText: '根据节点任务内容自动识别所属领域'
+          };
+      if (assignMode === 'difficulty') {
+        const tierText = n.model && Number.isInteger(n.model.tier) ? '档位' + (n.model.tier + 1) : '自动';
+        const how = { node: '手选', agent: '子智能体', tier: tierText, main: '主模型' }[pick.by];
+        return {
+          subText: how + ' · ' + (TIER_LABEL[n.tier] || ''),
+          fullReason: dom.basisText + '；当前处于「按难度档位」模式（' + how + ' · ' + (TIER_LABEL[n.tier] || '') + ' → ' + modelName + '）'
+        };
+      }
+      if (pick.by === 'node') {
+        return {
+          subText: dom.tendency + ' ｜ 依据：手选锁定',
+          fullReason: dom.basisText + '；当前已由用户手动锁定为模型 ' + modelName
+        };
+      }
+      if (pick.by === 'agent') {
+        return {
+          subText: dom.tendency + ' ｜ 依据：随子智能体',
+          fullReason: dom.basisText + '；当前跟随子智能体「' + (n.agent || '') + '」统一使用模型 ' + modelName
+        };
+      }
+      if (pick.by === 'tier') {
+        const subText = (n.model && n.model.cardBasis)
+          ? n.model.cardBasis
+          : (dom.tendency + ' ｜ 依据：' + dom.labels.join('+') + '榜 #1');
+        const fullReason = (n.model && n.model.reason)
+          ? n.model.reason
+          : (dom.basisText + '；按领域排行榜自动匹配最优模型 ' + modelName);
+        return { subText, fullReason };
+      }
+      return {
+        subText: dom.tendency + ' ｜ 依据：当前主模型',
+        fullReason: dom.basisText + '；当前使用主模型 ' + modelName + ' 执行（添加更多模型后将按领域排行榜自动优选专长模型）'
+      };
+    }
+
     function nodeHtml(n, auto) {
       const p = posOf(n, auto);
       // 实际用哪个模型及原因，与执行时的选择规则相同（手选 > 子智能体 > 自动分配[领域排行榜/难度档位] > 主模型）
       const pick = window.PiWorkflowRun.modelFor(n, data.agents);
       const modelName = pick.model ? pick.model.model : (mainModel || '主模型');
-      const catLabel = n.model && n.model.category && CATEGORY_LABEL[n.model.category] ? CATEGORY_LABEL[n.model.category] : '';
-      const tierText = n.model && Number.isInteger(n.model.tier) ? '档位' + (n.model.tier + 1) : '自动';
-      const autoHow = assignMode === 'difficulty' ? tierText : (catLabel ? (catLabel + (Number.isInteger(n.model && n.model.tier) ? '·' + tierText : '')) : tierText);
-      const how = { node: '手选', agent: '子智能体', tier: autoHow, main: '主模型' }[pick.by];
+      const domInfo = nodeDomainSummary(n, pick, modelName);
       const run = n.run || null, running = run && run.status === 'running';
       const runLabel = { running: '运行中…', done: '✓ 已运行', error: '运行失败', stale: '结果已过期' }[run && run.status] || '';
       const tags = [...n.skills.map(s => '技能·' + s), ...n.tools].map(t => '<span class="wf-tag">' + esc(t) + '</span>').join('');
       return '<article class="wf-node' + (running ? ' running' : '') + (selected === n.id ? ' selected' : '') + (stale.has(n.id) ? ' stale' : '') + '" data-node="' + esc(n.id) + '" style="transform:translate(' + p.x + 'px,' + p.y + 'px);width:' + NODE_W + 'px" tabindex="0" aria-label="' + esc(n.title) + '">' +
         '<header><span class="wf-id">' + esc(n.id) + '</span><strong title="' + esc(n.title) + '">' + esc(n.title) + '</strong><button type="button" class="wf-edit" data-act="edit" aria-label="修改 ' + esc(n.title) + '" title="修改">✎</button></header>' +
         '<div class="wf-role">' + (n.agent ? '<span class="wf-agent" style="--agent:' + agentColor(n.agent) + '" title="所属子智能体">' + esc(n.agent) + '</span>' : '') + esc(n.role) + '</div>' +
-        '<p class="wf-brief" title="双击查看完整提示词">' + esc(n.brief) + '</p>' +
-        '<footer><button type="button" class="wf-model" data-act="model" title="切换模型">' + esc(modelName) + '<small>' + esc(how + ' · ' + (TIER_LABEL[n.tier] || '')) + (n.effort && n.effort !== 'off' ? ' · 思考' + esc(EFFORT_LABEL[n.effort]) : '') + '</small></button>' + (tags ? '<div class="wf-tags">' + tags + '</div>' : '') + '<div class="wf-runrow"><button type="button" class="wf-run" data-act="run"' + (running ? ' disabled' : '') + ' title="单独运行这个节点（依赖的上游节点需要先有结果）">▶ 运行</button>' + (runLabel ? '<button type="button" class="wf-runstate ' + esc(run.status) + '" data-act="result" title="查看结果">' + runLabel + '</button>' : '') + '</div></footer>' +
+        '<p class="wf-brief" title="双击查看完整提示词与选型依据">' + esc(n.brief) + '</p>' +
+        '<footer><button type="button" class="wf-model" data-act="model" title="' + esc(domInfo.fullReason + '（点击切换模型）') + '">' + esc(modelName) + '<small>' + esc(domInfo.subText) + (n.effort && n.effort !== 'off' ? ' · 思考' + esc(EFFORT_LABEL[n.effort]) : '') + '</small></button>' + (tags ? '<div class="wf-tags">' + tags + '</div>' : '') + '<div class="wf-runrow"><button type="button" class="wf-run" data-act="run"' + (running ? ' disabled' : '') + ' title="单独运行这个节点（依赖的上游节点需要先有结果）">▶ 运行</button>' + (runLabel ? '<button type="button" class="wf-runstate ' + esc(run.status) + '" data-act="result" title="查看结果">' + runLabel + '</button>' : '') + '</div></footer>' +
         (stale.has(n.id) ? '<span class="wf-stale" title="上游已修改，结果已过期">需更新</span>' : '') + '</article>';
     }
 
@@ -99,7 +141,11 @@ window.PiWorkbenchModules.workflow = {
 
     function editorHtml() {
       const n = data.nodes.find(x => x.id === editing.id); if (!n) return '';
+      const pick = window.PiWorkflowRun.modelFor(n, data.agents);
+      const modelName = pick.model ? pick.model.model : (mainModel || '主模型');
+      const domInfo = nodeDomainSummary(n, pick, modelName);
       return '<aside class="wf-editor" role="dialog" aria-label="修改节点"><header><strong>' + esc(n.id) + ' · ' + esc(n.title) + '</strong><button type="button" data-act="close-editor" aria-label="关闭">×</button></header>' +
+        '<p class="wf-fieldnote">' + esc(domInfo.fullReason) + '</p>' +
         '<label>角色<input data-f="role" maxlength="20" value="' + esc(n.role) + '"></label>' +
         '<label>任务介绍<input data-f="brief" maxlength="80" value="' + esc(n.brief) + '"></label>' +
         '<label>所属子智能体<input data-f="agent" maxlength="8" list="wf-agent-list" placeholder="例如：研究员（留空 = 不分组）" value="' + esc(n.agent || '') + '"><datalist id="wf-agent-list">' + agentNames().map(a => '<option value="' + esc(a) + '">').join('') + '</datalist></label>' +
@@ -200,12 +246,15 @@ window.PiWorkbenchModules.workflow = {
       pop.innerHTML = '<div class="wf-full" role="dialog" aria-label="运行结果"><header><strong>' + esc(n.title) + ' · ' + (r.status === 'error' ? '运行失败' : '运行结果') + '</strong><button type="button" data-act="close-pop" aria-label="关闭">×</button></header>' + (meta ? '<p class="wf-note">' + esc(meta) + '</p>' : '') + '<pre>' + esc(r.status === 'error' ? r.error : r.output) + '</pre></div>'; pop.hidden = false;
     }
 
-    // ---- 双击：完整提示词（只读弹层）
+    // ---- 双击：完整提示词与领域选型依据（只读弹层）
     function showPrompt(nodeId) {
       const n = data.nodes.find(x => x.id === nodeId); if (!n) return;
+      const pick = window.PiWorkflowRun.modelFor(n, data.agents);
+      const modelName = pick.model ? pick.model.model : (mainModel || '主模型');
+      const domInfo = nodeDomainSummary(n, pick, modelName);
       const pop = host.querySelector('.wf-pop'); pop.dataset.node = nodeId;
       pop.style.left = '12px'; pop.style.top = '48px';
-      pop.innerHTML = '<div class="wf-full" role="dialog" aria-label="完整提示词"><header><strong>' + esc(n.title) + ' · 完整提示词</strong><button type="button" data-act="close-pop" aria-label="关闭">×</button></header><pre>' + esc(n.prompt) + '</pre></div>';
+      pop.innerHTML = '<div class="wf-full" role="dialog" aria-label="完整提示词"><header><strong>' + esc(n.title) + ' · 完整提示词与选型依据</strong><button type="button" data-act="close-pop" aria-label="关闭">×</button></header><p class="wf-note">' + esc(domInfo.fullReason) + '</p><pre>' + esc(n.prompt) + '</pre></div>';
       pop.hidden = false;
     }
 

@@ -68,8 +68,11 @@ async function writeWorkflow(root, state, options = {}) {
   const files = [], perNode = {};
   const put = async (rel, data) => { await fs.writeFile(path.join(dir, rel), data, typeof data === 'string' ? 'utf8' : undefined); files.push(path.join(dir, rel)); };
   const lines = ['# ' + (state?.goal || '工作流'), ''];
+  const lb = (() => { try { return require('./model-leaderboard.js'); } catch { return null; } })();
   for (const n of nodes) {
-    lines.push('## ' + n.id + ' · ' + n.title, '', '- 角色：' + n.role, '- 模型：' + (n.model ? n.model.model : '主模型') + '，难度 ' + n.tier, '- 依赖：' + (n.dependsOn.length ? n.dependsOn.join('、') : '无'), '- 状态：' + ({ done: '已运行', error: '失败', stale: '结果已过期', running: '运行中' }[n.run?.status] || '未运行'), '', n.brief, '');
+    const domInfo = lb && typeof lb.inferDomains === 'function' ? lb.inferDomains(n) : null;
+    const basis = (n.model && (n.model.reason || n.model.cardBasis)) || (domInfo ? domInfo.tendency + '（' + domInfo.basisText + '）' : '');
+    lines.push('## ' + n.id + ' · ' + n.title, '', '- 角色：' + n.role, '- 模型：' + (n.model ? n.model.model : '主模型') + (basis ? ' ｜ ' + basis : ''), '- 依赖：' + (n.dependsOn.length ? n.dependsOn.join('、') : '无'), '- 状态：' + ({ done: '已运行', error: '失败', stale: '结果已过期', running: '运行中' }[n.run?.status] || '未运行'), '', n.brief, '');
   }
   await put('plan.json', JSON.stringify({ goal: state?.goal || '', revision: state?.revision || 0, nodes: nodes.map(({ run, ...rest }) => rest) }, null, 2));
   await migrateFolders(dir, nodes);
