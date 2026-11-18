@@ -89,9 +89,9 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '',
     '### 路径 B（适合本身是 MCP Client、无独立网关/CLI 入口的 Agent）：MCP 在线接力',
     '1. 加载或连接 `mcp-config.json`（或使用 `mcpUrl`），调用 `pi_workbench_check_compatibility` 完成前置校验；',
-    '2. 调用 `pi_workbench_register_agent` 提交（`models` 至少填入你当前正在使用的真实模型 ID）：',
+    '2. 调用 `pi_workbench_register_agent` 提交（**必须填写 `activeModel` 为你当前对话窗口正在运行的真实模型 ID，并把它排在 `models` 第 1 位；严禁直接把本地配置文件如 `models.json` 的第 1 项当作当前模型**）：',
     '```json',
-    '{"name":"当前 MCP Agent","agentTransport":"mcp-relay","models":["你当前正在使用的真实模型ID"]}',
+    '{"name":"当前 MCP Agent","agentTransport":"mcp-relay","activeModel":"你当前对话窗口正在运行的真实模型ID","models":["你当前对话窗口正在运行的真实模型ID","其他可选模型ID"]}',
     '```',
     '3. **关键：拿到返回的 `profileId` 后不要结束本轮回复！** 请立刻进入持续接单循环（否则 Pi Workbench 超过宽限期无轮询会判定离线并请求失败）：',
     '   - 调用 `pi_workbench_await_task(profileId, timeoutMs: 55000)` 挂起等待任务；',
@@ -103,11 +103,12 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '- **MCP 工具调用**：挂载本目录 `mcp-config.json` 后调用 `pi_workbench_register_agent`；若通过 HTTP 客户端直连 MCP，**必须使用 `POST /mcp` 发送 JSON-RPC，禁止对 `/mcp` 发 `GET`（`GET /mcp` 为 SSE 长连接，会一直挂起）**；',
     `- **HTTP POST**：携带 \`Authorization: Bearer ${token}\` 与 \`Content-Type: application/json\` POST 到 \`${registerUrl}\`。`,
     '',
-    '## 三点五、模型列表（必须如实上报，否则用户在 Pi Workbench 里选不到模型）',
-    '- 注册时的 `models` 必须是你**当前真实可用于对话的全部模型 ID**（不要只写默认值，更不要编造）；请先从你自己的模型选择列表、配置文件或自带命令（例如 `opencode models`）里枚举。',
-    '- 若无法枚举全量内置模型列表（例如桌面端仅暴露当前会话模型），**至少把你当前会话正在使用的真实模型 ID 放进 `models`**（只有在连当前模型 ID 都无法确定时才用 `relay-main` 占位）。',
+    '## 三点五、模型列表与当前活动模型（必须如实上报，严禁张冠李戴）',
+    '- **关键规则（防止新对话显示旧模型/错误模型）**：无论走路径 A 还是路径 B，请务必在 `activeModel` 字段填入**你当前对话窗口实际正在运行的模型 ID**（根据你当前会话的自身系统提示/运行时身份确定），并把该模型放在 `models` 数组的**第 1 位（`models[0]`）**！切勿不加核对就直接把本地配置文件（如 `models.json`）里的第 1 项当作当前模型。',
+    '- 注册时的 `models` 必须是你**当前真实可用于对话的全部模型 ID**（不要只写默认值，更不要编造）；请先从你自己的模型选择列表、配置文件或自带命令（例如 `opencode models`）里枚举，并确保 `activeModel` 排在首位。',
+    '- 若无法枚举全量内置模型列表（例如桌面端仅暴露当前会话模型），**请把你当前会话正在使用的真实模型 ID 填进 `activeModel` 和 `models` 首位**（只有在连当前模型 ID 都无法确定时才用 `relay-main` 占位）。',
     '- 若是命令行 Agent 且有列出模型的命令，请额外提交 `"modelsCommand":"opencode models"`（Pi Workbench 之后可自动刷新模型列表）。',
-    `- 之后模型有变动，可随时调用 MCP 工具 \`pi_workbench_update_models\`，或 POST \`${baseUrl}/pair/update-models\`（同样带 Bearer Token）提交 \`{"profileId":"注册回执里的 profileId","models":["模型A","模型B"]}\`。`,
+    `- 之后模型或在用窗口有变动（例如用户在你的新对话窗口切换了模型），请调用 MCP 工具 \`pi_workbench_update_models\` 或重调 \`pi_workbench_register_agent\`，或 POST \`${baseUrl}/pair/update-models\` 提交 \`{"profileId":"注册回执里的 profileId","activeModel":"当前对话真实模型ID","models":["当前对话真实模型ID","其他模型"]}\`。`,
     '- 模型列表仅代表源 Agent 上报的目录，不等于已验证每个模型的可用性或切换能力。接力任务含 `model` 字段；若无法使用指定模型，必须以 `isError:true` 回传原因，不能静默使用其他模型。',
     '- 连全量列表和当前模型 ID 都无法确定时，才返回空数组并说明原因；不要把记忆中的厂商型号当作当前可用列表。',
     '',
@@ -130,12 +131,12 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     ? [
         `请先读取本地接入说明文件：${connectDocPath}`,
         '按其中的前置过滤规则自行判断当前环境是否满足接入条件（不满足请直接告知用户并停止，不要编造成功）；',
-        '若符合条件，请直接使用同目录下的 MCP（mcp-config.json / mcp-server.cjs）或配对凭证（pairing.json）自主完成连接与注册（务必上报真实模型列表或至少当前在用模型 ID）。',
+        '若符合条件，请直接使用同目录下的 MCP（mcp-config.json / mcp-server.cjs）或配对凭证（pairing.json）自主完成连接与注册（务必在 activeModel 填写你当前对话窗口实际运行的真实模型 ID 并排在 models 第 1 位，切勿直接照搬配置文件首项）。',
         '若是网关/CLI/API 方式，完成后向用户汇报即可；若是 mcp-relay（MCP 在线接力），拿到 profileId 后请勿结束回复，立即持续循环调用 pi_workbench_await_task 挂起接单（idle 时继续 await）并用 pi_workbench_submit_result 回传结果。'
       ].join('\n')
     : [
         `请读取本次 Pi Workbench 接入端点与 MCP Server：${mcpUrl}（或 HTTP 注册地址 ${registerUrl}，Token: ${token}）。`,
-        '先判断是否具备连接本地 MCP 或访问 127.0.0.1 的能力，不符合请直接停止；符合则通过 `pi_workbench_register_agent` 或 POST 注册（务必上报真实模型列表或至少当前在用模型 ID）。',
+        '先判断是否具备连接本地 MCP 或访问 127.0.0.1 的能力，不符合请直接停止；符合则通过 `pi_workbench_register_agent` 或 POST 注册（务必在 activeModel 填写当前对话窗口实际运行的真实模型 ID 并排在 models 首位）。',
         '若是 mcp-relay（MCP 在线接力），拿到 profileId 后请勿结束回复，立即持续循环调用 pi_workbench_await_task 挂起接单并用 pi_workbench_submit_result 回传结果。'
       ].join('\n');
 
@@ -387,18 +388,20 @@ function createPairingServer({
           modelsCommand: { type: 'string', description: '列出本 Agent 可用模型的命令，如 "opencode models"（可选，便于自动刷新）' },
           launchCommand: { type: 'string', description: '可选：用于随 Pi Workbench 链式启动该网关或客户端的可执行文件路径/命令' },
           launchArgs: { type: 'array', items: { type: 'string' }, description: '可选：链式启动参数' },
-          models: { type: 'array', items: { type: 'string' }, description: '你当前真实可用的全部模型 ID，必须如实枚举，不要编造' }
+          activeModel: { type: 'string', description: '当前对话窗口实际正在运行的真实模型 ID（必须与当前窗口一致，不要盲目填本地配置文件首项）' },
+          models: { type: 'array', items: { type: 'string' }, description: '你当前真实可用的全部模型 ID（请将当前窗口正在运行的 activeModel 排在第 1 位）' }
         },
         required: ['name']
       }
     },
     {
       name: 'pi_workbench_update_models',
-      description: '更新已注册 Agent 的真实可用模型列表（模型有变化或注册时未能枚举时使用）。',
+      description: '更新已注册 Agent 的真实可用模型列表与当前对话活动模型（模型或新对话窗口有变化时使用）。',
       inputSchema: {
         type: 'object',
         properties: {
           profileId: { type: 'string', description: '注册回执返回的 profileId' },
+          activeModel: { type: 'string', description: '当前对话窗口实际正在运行的真实模型 ID' },
           models: { type: 'array', items: { type: 'string' } }
         },
         required: ['profileId', 'models']

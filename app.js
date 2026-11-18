@@ -1175,9 +1175,10 @@
     $('#titlebar').addEventListener('dblclick',e=>{if(e.target.closest('button,a,input,select'))return;void api.control('toggle-maximize');});
   }
   // ---- 工作流：任务级开关 + 发送前拆解 + 右侧画布同步
+  const wfAssignMode=()=>state.settings.workflowAssignMode==='difficulty'?'difficulty':'leaderboard';
   async function workflowModels(){const r=await window.piDesktop?.workflow?.models?.();return r?.ok?r.result:[];}
   async function workflowTiers(){try{const c=await window.piDesktop?.provider?.getConfig?.();return window.PiModelTiers?.normalize(c?.modelTiers)||[];}catch{return [];}}
-  async function pushWorkflowModels(){const session=wfSession(),tiers=await workflowTiers(),payload={mainModel:(await window.piDesktop?.provider?.getConfig?.())?.model||'',running:Boolean(wfAllRun),models:await workflowModels(),tiersConfigured:window.PiModelTiers?window.PiModelTiers.configured(tiers).length:0};if(!session)return;const frame=session===trialSession?$('#preview-frame'):$('#module-frame');frame?.contentWindow?.postMessage({source:'pi-workbench-shell',key:'workflow',type:session.custom?'runtime-invoke':'invoke',command:'setModels',payload},'*');}
+  async function pushWorkflowModels(){const session=wfSession(),tiers=await workflowTiers(),payload={mainModel:(await window.piDesktop?.provider?.getConfig?.())?.model||'',running:Boolean(wfAllRun),models:await workflowModels(),tiersConfigured:window.PiModelTiers?window.PiModelTiers.configured(tiers).length:0,assignMode:wfAssignMode()};if(!session)return;const frame=session===trialSession?$('#preview-frame'):$('#module-frame');frame?.contentWindow?.postMessage({source:'pi-workbench-shell',key:'workflow',type:session.custom?'runtime-invoke':'invoke',command:'setModels',payload},'*');}
 
   function pushToCanvas(){if(active?.id!=='workflow')return;const c=located(active.taskId);const frame=$('#module-frame');frame?.contentWindow?.postMessage({source:'pi-workbench-shell',key:'workflow',type:'server-state',data:structuredClone(c?.task.workbenches.workflow||{}),events:[]},'*');}
   const workflowEnabled=c=>window.PiWorkbenchLibrary.workflowEnabled(c?.task);
@@ -1287,7 +1288,7 @@
     const tiers=window.PiModelTiers?.normalize(cfg?.modelTiers)||[];
     const vendors=await workflowModels();
     const nodes=window.PiModelLeaderboard?.assignByDomain
-      ?window.PiModelLeaderboard.assignByDomain(plan.plan.nodes,{tiers,vendors,snapshot:cfg?.rankings,tiersApi:window.PiModelTiers})
+      ?window.PiModelLeaderboard.assignByDomain(plan.plan.nodes,{mode:wfAssignMode(),tiers,vendors,snapshot:cfg?.rankings,tiersApi:window.PiModelTiers})
       :(window.PiModelTiers?window.PiModelTiers.assignAll(plan.plan.nodes,tiers):plan.plan.nodes);
     try{await runWorkbenchAction(session,'setPlan',{goal:plan.goal,nodes},'ui');void pushWorkflowModels();}
     catch(error){notify('计划写入失败：'+error.message);return null;}
@@ -1731,6 +1732,27 @@
       await runWorkbenchAction(session,'setNodeInputs',{id:node.id,inputs:next,baseRevision:data.revision},'ui');return {ok:true,changed:true,skipped};
     }
     if(payload.openHtml){if(!dir)throw new Error('这个聊天还没有工作文件夹');const r=await window.piDesktop.workflow.openHtml({root:dir});if(!r?.ok)throw new Error(r?.error||'打开失败');return {ok:true};}
+    if(payload.switchAssignMode||payload.reassignAuto){
+      if(payload.switchAssignMode==='difficulty'||payload.switchAssignMode==='leaderboard'){
+        state.settings.workflowAssignMode=payload.switchAssignMode;save();
+      }
+      const mode=wfAssignMode();
+      const cfg=await window.piDesktop?.provider?.getConfig?.();
+      const tiers=window.PiModelTiers?.normalize(cfg?.modelTiers)||[];
+      const vendors=await workflowModels();
+      const curNodes=(data.nodes||[]).map(n=>n.model?.source==='user'?n:{...n,model:null});
+      const nextNodes=window.PiModelLeaderboard?.assignByDomain
+        ?window.PiModelLeaderboard.assignByDomain(curNodes,{mode,tiers,vendors,snapshot:cfg?.rankings,tiersApi:window.PiModelTiers})
+        :(window.PiModelTiers?window.PiModelTiers.assignAll(curNodes,tiers):curNodes);
+      const c=located(session.taskId);
+      if(c&&c.task.workbenches?.workflow){
+        const nextState={...c.task.workbenches.workflow,nodes:nextNodes};
+        applyWorkbenchState(c,'workflow',nextState,{source:'ui',label:'用户 · 切换工作流模型分配策略',events:[]});
+        void pushWorkflowModels();
+      }
+      if(payload.switchAssignMode)notify(mode==='difficulty'?'工作流已切换为：按难度档位分配模型':'工作流已切换为：按领域排行榜分配模型');
+      return {ok:true,assignMode:mode};
+    }
     const r=payload.all?wfRunAll(session,payload.pendingOnly===true):payload.stop?wfStop():wfRunNode(session,String(payload.id||''));if(!r.ok)throw new Error(r.error);return r;
   }
   function assertWorkbenchSession(session){if(!session||session.closing||(session!==active&&session!==trialSession))throw new Error('工作台已关闭或已切换，本次结果未写回任务');}

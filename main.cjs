@@ -1319,9 +1319,10 @@ if(primaryInstance)app.whenReady().then(() => {
     });
   }
   const relayDispatchViaServer = (pid, req) => pairingServer ? pairingServer.dispatchRelayTask(pid, req) : Promise.reject(new Error('MCP 配对服务未启动'));
-  // 保存外部 Agent 探测/上报到的完整模型列表；常用槽位还是占位值（main / relay-main / 空）时，自动换成前 4 个真实模型。
-  async function saveDiscoveredModels(id, models) {
-    const list = [...new Set((Array.isArray(models) ? models : []).map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+  // 保存外部 Agent 探测/上报到的完整模型列表；常用槽位还是占位值（main / relay-main / 空）或显式指定了 activeModel 时，同步当前模型与前 4 个槽位。
+  async function saveDiscoveredModels(id, models, activeModel = '') {
+    const explicitActive = String(activeModel || '').trim();
+    const list = [...new Set([explicitActive, ...(Array.isArray(models) ? models : [])].map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
     if (!list.length) return null;
     return serializeProviderWrite(async () => {
       const old = await readProviderConfig();
@@ -1331,7 +1332,14 @@ if(primaryInstance)app.whenReady().then(() => {
       const p = profiles[idx];
       const placeholder = !(p.models || []).length || (p.models || []).every(m => ['main', 'relay-main'].includes(m));
       p.discoveredModels = list;
-      if (placeholder) { p.models = list.slice(0, 4); p.model = p.models[0] || ''; }
+      if (placeholder) {
+        p.models = list.slice(0, 4);
+        p.model = explicitActive || p.models[0] || '';
+      } else if (explicitActive) {
+        const merged = [explicitActive, ...(p.models || []).filter(m => m && m !== explicitActive && !['main', 'relay-main'].includes(m)), ...list];
+        p.models = [...new Set(merged)].slice(0, 4);
+        p.model = explicitActive;
+      }
       profiles[idx] = p;
       const document = { schema: 2, activeProfileId: old.activeProfileId || profiles[0]?.id || id, profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
       await storeProviderConfig(document);
@@ -1349,11 +1357,12 @@ if(primaryInstance)app.whenReady().then(() => {
     pairingServer = createPairingServer({
       async onUpdateModels(payload = {}) {
         const id = String(payload.profileId || '').trim();
-        const doc = await saveDiscoveredModels(id, payload.models);
+        const activeModel = String(payload.activeModel || payload.currentModel || payload.model || '').trim();
+        const doc = await saveDiscoveredModels(id, payload.models, activeModel);
         if (!doc) throw new Error('找不到已注册的 Agent（profileId 无效）或 models 为空：' + id);
         const prof = providerProfiles(doc).find(x => x.id === id);
         broadcastProviderModels(doc, id, prof?.name || '', (prof?.discoveredModels || []).length);
-        return { profileId: id, count: (prof?.discoveredModels || []).length, selected: prof?.models || [] };
+        return { profileId: id, activeModel: prof?.model || '', count: (prof?.discoveredModels || []).length, selected: prof?.models || [] };
       },
       nodePath: process.execPath,
       bundleDir: path.join(app.getPath('userData'), 'agent-connect'),
@@ -1368,7 +1377,8 @@ if(primaryInstance)app.whenReady().then(() => {
           : '';
         const fallbackUrl = external ? (transport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
         const baseUrl = cleanUrl(payload.baseUrl !== undefined ? payload.baseUrl : fallbackUrl, external);
-        const rawModels = Array.isArray(payload.models) ? payload.models.map(x => String(x || '').trim()).filter(Boolean) : [];
+        const explicitActive = String(payload.activeModel || payload.currentModel || payload.model || '').trim();
+        const rawModels = [explicitActive, ...(Array.isArray(payload.models) ? payload.models : [])].map(x => String(x || '').trim()).filter(Boolean);
         const allModels = [...new Set(rawModels)].slice(0, 200);
         const models = allModels.length ? allModels.slice(0, 4) : [transport === 'mcp-relay' ? 'relay-main' : 'main'];
         const id = String(payload.profileId || payload.id || ('agent-' + require('node:crypto').randomBytes(4).toString('hex')));
@@ -1389,7 +1399,7 @@ if(primaryInstance)app.whenReady().then(() => {
           promptMode: payload.promptMode === 'arg' ? 'arg' : 'stdin',
           mcpSupport: payload.mcpSupport === 'none' ? 'none' : 'mcp-config',
           models,
-          model: models[0] || '',
+          model: explicitActive || models[0] || '',
           apiKey: rawKey
         };
 
@@ -1451,9 +1461,20 @@ if(primaryInstance)app.whenReady().then(() => {
             modelEfforts: prev.modelEfforts || {},
             apiKeyEncrypted
           };
-          if (idx >= 0) profiles[idx] = record; else profiles.push(record);
-          const hasExistingModel = Boolean(profiles.find(p => p.id === old.activeProfileId)?.model);
-          const nextActiveId = payload.makeActive === true || !hasExistingModel ? id : (old.activeProfileId || id);
+          if (idx >= 0) profiles[idx] = record;
+          else {
+            if (candidate.agentTransport === 'mcp-relay') {
+              for (let i = profiles.length - 1; i >= 0; i--) {
+                const p = profiles[i];
+                if (p && p.agentTransport === 'mcp-relay' && String(p.name || '').trim() === candidate.name && p.id !== id) {
+                  ephemeralRelays.delete(p.id);
+                  profiles.splice(i, 1);
+                }
+              }
+            }
+            profiles.push(record);
+          }
+          const nextActiveId = payload.makeActive === false ? (old.activeProfileId || id) : id;
           const document = { schema: 2, activeProfileId: String(nextActiveId), profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
           await storeProviderConfig(document);
           return document;

@@ -34,7 +34,7 @@
       prompt,                                                            // 完整提示词，双击才展示
       tier: tierOf(raw.tier),                                            // 难度 1-5（兼容旧的 light/standard/strong），决定默认用哪档模型
       effort: EFFORTS.includes(raw.effort) ? raw.effort : null,          // 思考强度；null = 跟随模型默认
-      model: raw.model && typeof raw.model === 'object' ? { profileId: clip(raw.model.profileId, 80), model: clip(raw.model.model, 120), source: raw.model.source === 'user' ? 'user' : 'auto', ...(Number.isInteger(raw.model.tier) ? { tier: raw.model.tier } : {}) } : null,
+      model: raw.model && typeof raw.model === 'object' ? { profileId: clip(raw.model.profileId, 80), model: clip(raw.model.model, 120), source: raw.model.source === 'user' ? 'user' : 'auto', ...(Number.isInteger(raw.model.tier) ? { tier: raw.model.tier } : {}), ...(raw.model.category ? { category: clip(raw.model.category, 20) } : {}) } : null,
       run: runOf(raw.run),                                               // 最近一次运行结果；改动节点后会被清空/标记过期
       deliver: [...new Set((Array.isArray(raw.deliver) ? raw.deliver : []).filter(x => DELIVER.includes(x)))].slice(0, 2),   // 要什么文件产出；只有真需要时才有
       inputs: (Array.isArray(raw.inputs) ? raw.inputs : []).map(inp).filter(Boolean).slice(0, 6),                              // 用户给这个节点的附件（元数据；文件本身在节点文件夹的 inputs/ 里）

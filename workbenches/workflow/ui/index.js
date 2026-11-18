@@ -8,6 +8,7 @@ window.PiWorkbenchModules.workflow = {
     const G = window.PiWorkflowGraph;
     const NODE_W = 240, NODE_H = 176, COL = 300, ROW = 190;
     const TIER_LABEL = { 1: '难度1', 2: '难度2', 3: '难度3', 4: '难度4', 5: '难度5' };
+    const CATEGORY_LABEL = { overall: '综合榜', coding: '编程榜', math: '数学推理榜', knowledge: '科学知识榜', writing: '文学创意榜', instruction: '指令遵循榜' };
     const DELIVER_OPTIONS = [['table', '表格（.xlsx）', '一个 CSV 同时另存 Excel 文件'], ['html', '网页（可交互）', '单文件 HTML，图形/交互为主'], ['image', '图（.svg）', '流程图、框图、示意图'], ['file', '其他文件', '.md .json 代码等文本文件']];
     const INPUT_KIND = { text: '文本', table: '表格', image: '图片', binary: '文件' };
     const fmtBytes = n => { const b = Number(n) || 0; return b >= 1048576 ? (b / 1048576).toFixed(1) + 'MB' : b >= 1024 ? Math.round(b / 1024) + 'KB' : b + 'B'; };
@@ -20,6 +21,7 @@ window.PiWorkbenchModules.workflow = {
     let data = { nodes: [], revision: 0, goal: '', ...(api.data || {}), viewport: savedView || { x: 24, y: 24, zoom: 1 } };
     let planStatus = { phase: 'idle' };   // 由壳层通过 invoke('setPlanStatus') 推送：idle | planning | failed | skipped
     let tiersConfigured = 0;               // 已配置的档位数；0 表示全部节点用主模型
+    let assignMode = 'leaderboard';        // 自动分配策略：'leaderboard'（按领域排行榜，默认） | 'difficulty'（按难度档位）
     let mainModel = '', allRunning = false;
     let models = [];                       // 由壳层通过 invoke('setModels') 提供：[{profileId, vendor, models:[…]}]
     let selected = null, editing = null, pendingMove = null, disposed = false, saveTimer = null, busy = false;
@@ -37,10 +39,13 @@ window.PiWorkbenchModules.workflow = {
 
     function nodeHtml(n, auto) {
       const p = posOf(n, auto);
-      // 实际用哪个模型及原因，与执行时的选择规则相同（手选 > 子智能体 > 档位 > 主模型）
+      // 实际用哪个模型及原因，与执行时的选择规则相同（手选 > 子智能体 > 自动分配[领域排行榜/难度档位] > 主模型）
       const pick = window.PiWorkflowRun.modelFor(n, data.agents);
       const modelName = pick.model ? pick.model.model : (mainModel || '主模型');
-      const how = { node: '手选', agent: '子智能体', tier: (n.model && Number.isInteger(n.model.tier) ? '档位' + (n.model.tier + 1) : '自动'), main: '主模型' }[pick.by];
+      const catLabel = n.model && n.model.category && CATEGORY_LABEL[n.model.category] ? CATEGORY_LABEL[n.model.category] : '';
+      const tierText = n.model && Number.isInteger(n.model.tier) ? '档位' + (n.model.tier + 1) : '自动';
+      const autoHow = assignMode === 'difficulty' ? tierText : (catLabel ? (catLabel + (Number.isInteger(n.model && n.model.tier) ? '·' + tierText : '')) : tierText);
+      const how = { node: '手选', agent: '子智能体', tier: autoHow, main: '主模型' }[pick.by];
       const run = n.run || null, running = run && run.status === 'running';
       const runLabel = { running: '运行中…', done: '✓ 已运行', error: '运行失败', stale: '结果已过期' }[run && run.status] || '';
       const tags = [...n.skills.map(s => '技能·' + s), ...n.tools].map(t => '<span class="wf-tag">' + esc(t) + '</span>').join('');
@@ -77,8 +82,8 @@ window.PiWorkbenchModules.workflow = {
       const empty = !(data.nodes || []).length;
       const parallel = layout().parallel;
       host.innerHTML = '<div class="wf-root"><div class="wf-toolbar"><strong>工作流</strong><span class="wf-goal">' + esc(data.goal || '') + '</span><span class="wf-meta">' + (empty ? '' : data.nodes.length + ' 个节点' + (parallel ? ' · ' + parallel + ' 处并行' : '')) + '</span>' +
-        '<span class="wf-spacer"></span>' + (empty ? '' : '<label class="wf-htmlview" title="在工作文件夹的 workflow 里生成一个可交互、分层阅读的网页，比 .md 好读"><input type="checkbox" data-act="html-view"' + (data.htmlView ? ' checked' : '') + '> HTML 交互</label>' + (data.htmlView ? '<button type="button" class="wf-btn" data-act="open-html" title="用默认浏览器打开">打开</button>' : '')) + (agentNames().length ? '<button type="button" class="wf-btn" data-act="agents" title="按子智能体统一设置模型">子智能体 ' + agentNames().length + '</button>' : '') + (empty ? '' : (allRunning ? '<button type="button" class="wf-btn" data-act="stop">■ 停止</button>' : '<button type="button" class="wf-btn" data-act="run-pending" title="只运行还没有结果的节点（失败、过期、未运行）；已完成的保留，适合中断后继续">▶ 运行未完成</button><button type="button" class="wf-btn primary" data-act="run-all" title="按依赖顺序重新运行全部节点，互不依赖的并行；已有结果会被覆盖">▶ 运行全部</button>')) + '<button type="button" class="wf-btn" data-act="add"' + (empty ? ' disabled' : '') + '>＋ 节点</button><button type="button" class="wf-btn" data-act="reset" title="重新排列">整理</button><button type="button" class="wf-btn" data-act="fit">适应</button></div>' +
-        (empty || tiersConfigured ? '' : '<div class="wf-hint">给模型标上档位，可以按难度自动省钱（设置 → LLM → 模型档位）。现在所有节点都用主模型。</div>') + '<div class="wf-canvas" tabindex="0" aria-label="工作流画布"><div class="wf-world" style="transform:translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.zoom + ')">' + edgesSvg(auto) + (data.nodes || []).map(n => nodeHtml(n, auto)).join('') + '</div>' +
+        '<span class="wf-spacer"></span>' + (empty ? '' : '<button type="button" class="wf-btn" data-act="toggle-assign-mode" title="点击切换工作流模型自动分配策略：按领域排行榜（默认，跨领域选最强专长模型） / 按难度档位">分配：' + (assignMode === 'difficulty' ? '按难度档位' : '按领域榜') + '</button><label class="wf-htmlview" title="在工作文件夹的 workflow 里生成一个可交互、分层阅读的网页，比 .md 好读"><input type="checkbox" data-act="html-view"' + (data.htmlView ? ' checked' : '') + '> HTML 交互</label>' + (data.htmlView ? '<button type="button" class="wf-btn" data-act="open-html" title="用默认浏览器打开">打开</button>' : '')) + (agentNames().length ? '<button type="button" class="wf-btn" data-act="agents" title="按子智能体统一设置模型">子智能体 ' + agentNames().length + '</button>' : '') + (empty ? '' : (allRunning ? '<button type="button" class="wf-btn" data-act="stop">■ 停止</button>' : '<button type="button" class="wf-btn" data-act="run-pending" title="只运行还没有结果的节点（失败、过期、未运行）；已完成的保留，适合中断后继续">▶ 运行未完成</button><button type="button" class="wf-btn primary" data-act="run-all" title="按依赖顺序重新运行全部节点，互不依赖的并行；已有结果会被覆盖">▶ 运行全部</button>')) + '<button type="button" class="wf-btn" data-act="add"' + (empty ? ' disabled' : '') + '>＋ 节点</button><button type="button" class="wf-btn" data-act="reset" title="重新排列">整理</button><button type="button" class="wf-btn" data-act="fit">适应</button></div>' +
+        (empty || tiersConfigured ? '' : '<div class="wf-hint">默认按各节点所属领域排行榜分配模型；也可给模型标上档位（设置 → LLM → 模型档位）并在上方切换按排行榜或按难度档位。</div>') + '<div class="wf-canvas" tabindex="0" aria-label="工作流画布"><div class="wf-world" style="transform:translate(' + v.x + 'px,' + v.y + 'px) scale(' + v.zoom + ')">' + edgesSvg(auto) + (data.nodes || []).map(n => nodeHtml(n, auto)).join('') + '</div>' +
         (empty ? emptyHtml() : '') +
         '<div class="wf-zoom"><span>' + Math.round(v.zoom * 100) + '%</span></div></div>' + (editing ? editorHtml() : '') + '<div class="wf-pop" hidden></div></div>';
     }
@@ -141,7 +146,8 @@ window.PiWorkbenchModules.workflow = {
       const r = anchor.getBoundingClientRect(), h = host.getBoundingClientRect();
       pop.style.left = Math.max(4, Math.min(r.left - h.left, h.width - 230)) + 'px'; pop.style.top = (r.bottom - h.top + 4) + 'px';
       const vendors = models.length ? models : [];
-      pop.innerHTML = '<div class="wf-menu"><button type="button" data-model="auto">自动分配' + (!n.model ? ' ✓' : '') + '</button>' +
+      const autoModeText = assignMode === 'difficulty' ? '按难度档位' : '按领域榜';
+      pop.innerHTML = '<div class="wf-menu"><button type="button" data-model="auto">自动分配（' + autoModeText + '）' + (!n.model || n.model.source !== 'user' ? ' ✓' : '') + '</button>' +
         (vendors.length ? vendors.map((v, i) => '<div class="wf-vendor"><button type="button" class="wf-vendor-btn" data-vendor="' + i + '" aria-haspopup="menu">' + esc(v.vendor) + '<span>›</span></button>' +
           '<div class="wf-sub" role="menu">' + v.models.map(m => '<button type="button" role="menuitem" data-model="' + esc(v.profileId) + '::' + esc(m) + '">' + esc(m) + (n.model && n.model.profileId === v.profileId && n.model.model === m ? ' ✓' : '') + '</button>').join('') + '</div></div>').join('') : '<p class="wf-note">还没有可用模型，请先在设置 → LLM 里添加。</p>') + '</div>';
       pop.hidden = false;
@@ -153,12 +159,13 @@ window.PiWorkbenchModules.workflow = {
       const r = anchor.getBoundingClientRect(), h = host.getBoundingClientRect();
       pop.style.left = Math.max(4, Math.min(r.left - h.left, h.width - 260)) + 'px'; pop.style.top = (r.bottom - h.top + 4) + 'px';
       pop.dataset.node = ''; pop.dataset.agent = only || '';
+      const autoLabel = '自动（' + (assignMode === 'difficulty' ? '按难度档位' : '按领域榜') + '）';
       const rows = agentNames().map(name => {
         const count = data.nodes.filter(n => n.agent === name).length, m = agentModel(name);
         const vendors = models.length ? models : [];
         return '<div class="wf-agentrow"><span class="wf-agent" style="--agent:' + agentColor(name) + '">' + esc(name) + '</span><small>' + count + ' 个节点</small>' +
-          '<div class="wf-vendor"><button type="button" class="wf-vendor-btn" data-vendor="a' + esc(name) + '" aria-haspopup="menu">' + esc(m ? m.model : '自动（按难度）') + '<span>›</span></button>' +
-          '<div class="wf-sub" role="menu"><button type="button" role="menuitem" data-agent-model="' + esc(name) + '|auto">自动（按难度）' + (!m ? ' ✓' : '') + '</button>' +
+          '<div class="wf-vendor"><button type="button" class="wf-vendor-btn" data-vendor="a' + esc(name) + '" aria-haspopup="menu">' + esc(m ? m.model : autoLabel) + '<span>›</span></button>' +
+          '<div class="wf-sub" role="menu"><button type="button" role="menuitem" data-agent-model="' + esc(name) + '|auto">' + autoLabel + (!m ? ' ✓' : '') + '</button>' +
           vendors.map(v => '<div class="wf-subhead">' + esc(v.vendor) + '</div>' + v.models.map(mm => '<button type="button" role="menuitem" data-agent-model="' + esc(name) + '|' + esc(v.profileId) + '::' + esc(mm) + '">' + esc(mm) + (m && m.profileId === v.profileId && m.model === mm ? ' ✓' : '') + '</button>').join('')).join('') +
           '</div></div></div>';
       }).join('');
@@ -168,14 +175,14 @@ window.PiWorkbenchModules.workflow = {
       const pop = host.querySelector('.wf-pop'); if (pop) pop.hidden = true;
       const i = spec.indexOf('|'), name = spec.slice(0, i), value = spec.slice(i + 1);
       try {
-        if (value === 'auto') await act('setAgentModel', { name, model: null });
+        if (value === 'auto') { await act('setAgentModel', { name, model: null }); try { await api.request('wf-run', { reassignAuto: true }); } catch {} }
         else { const [profileId, ...rest] = value.split('::'); await act('setAgentModel', { name, model: { profileId, model: rest.join('::') } }); }
       } catch (error) { api.notify(error.message); }
     }
     async function chooseModel(nodeId, value) {
       const pop = host.querySelector('.wf-pop'); if (pop) pop.hidden = true;
       try {
-        if (value === 'auto') await act('setNodeModel', { id: nodeId, model: null });
+        if (value === 'auto') { await act('setNodeModel', { id: nodeId, model: null }); try { await api.request('wf-run', { reassignAuto: true }); } catch {} }
         else { const [profileId, ...rest] = value.split('::'); await act('setNodeModel', { id: nodeId, model: { profileId, model: rest.join('::') } }); }
       } catch (error) { api.notify(error.message); }
     }
@@ -252,6 +259,13 @@ window.PiWorkbenchModules.workflow = {
         case 'edit': editing = { id }; selected = id; render(); break;
         case 'model': event.stopPropagation(); openModelMenu(id, b); break;
         case 'agents': event.stopPropagation(); openAgentMenu(b); break;
+        case 'toggle-assign-mode': {
+          const nextMode = assignMode === 'difficulty' ? 'leaderboard' : 'difficulty';
+          assignMode = nextMode;
+          try { await api.request('wf-run', { switchAssignMode: nextMode }); } catch (e) { api.notify(e.message); }
+          render();
+          break;
+        }
         case 'open-html': try { await api.request('wf-run', { openHtml: true }); } catch (e) { api.notify(e.message); } break;
         case 'run': try { await api.request('wf-run', { id }); } catch (e) { api.notify(e.message); showError(id, e.message); } break;
         case 'run-all': try { allRunning = true; render(); await api.request('wf-run', { all: true }); } catch (e) { allRunning = false; render(); api.notify(e.message); } break;
@@ -391,7 +405,7 @@ window.PiWorkbenchModules.workflow = {
         const first = !host.querySelector('.wf-node'); if (editing) editing.error = null; render(); if (first && data.nodes.length && !savedView) fit();
       },
       invoke(command, payload = {}) {
-        if (command === 'setModels') { models = Array.isArray(payload.models) ? payload.models : []; tiersConfigured = Number(payload.tiersConfigured) || 0; mainModel = String(payload.mainModel || ''); allRunning = payload.running === true; if ((data.nodes || []).length) renderUnlessPopupOpen(); return '已更新可选模型'; }
+        if (command === 'setModels') { models = Array.isArray(payload.models) ? payload.models : []; tiersConfigured = Number(payload.tiersConfigured) || 0; if (payload.assignMode === 'difficulty' || payload.assignMode === 'leaderboard') assignMode = payload.assignMode; mainModel = String(payload.mainModel || ''); allRunning = payload.running === true; if ((data.nodes || []).length) renderUnlessPopupOpen(); return '已更新可选模型'; }
         if (command === 'setPlanStatus') { planStatus = payload && typeof payload === 'object' ? payload : { phase: 'idle' }; if (!(data.nodes || []).length) render(); return '已更新拆分状态'; }
         return api.server(command, payload);
       },
