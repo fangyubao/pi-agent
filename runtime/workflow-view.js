@@ -318,7 +318,7 @@
     var say = function (msg) { if (live) live.textContent = msg; };
     var search = $('.wfv-search'), fAgent = $('.wfv-filter-agent'), fStatus = $('.wfv-filter-status'), count = $('.wfv-count'), empty = $('.wfv-empty');
     var demoBtn = $('.wfv-demo-toggle'), demoPrev = $('.wfv-demo-prev'), demoNext = $('.wfv-demo-next');
-    var current = null, spy = null, timer = null, demoMode = false;
+    var current = null, spy = null, timer = null, demoMode = nodes.length > 1;
 
     // 生成时间按查看者的本地时区重新显示。
     $$('time[datetime]').forEach(function (t) { var d = new Date(t.getAttribute('datetime')); if (!isNaN(d.getTime())) t.textContent = d.toLocaleString('zh-CN', { hour12: false }); });
@@ -609,8 +609,15 @@
     const auto = dg.source === 'fallback' || dg.autoHeadline;
     let h = '<section class="wfv-overview wfv-panel" id="wfv-overview" aria-labelledby="wfv-ov-h"><h2 id="wfv-ov-h" class="wfv-h2">一句话结论</h2>';
     h += '<p class="wfv-headline">' + esc(dg.headline || '暂无结论') + '</p>';
-    if (Array.isArray(dg.metrics) && dg.metrics.length) {
-      h += '<div class="wfv-metrics" aria-label="核心指标">' + dg.metrics.map(m => '<div class="wfv-metric"><span class="wfv-metric-label">' + esc(m.label) + '</span><strong class="wfv-metric-val">' + esc(m.value) + '</strong>' + (m.note ? '<span class="wfv-metric-note">' + esc(m.note) + '</span>' : '') + '</div>').join('') + '</div>';
+    const metricsList = Array.isArray(dg.metrics) && dg.metrics.length
+      ? dg.metrics
+      : (total ? [
+          { label: '步骤完成', value: counts.done + ' / ' + total, note: counts.error ? counts.error + ' 步失败' : (counts.stale ? counts.stale + ' 步待更新' : '全部就绪') },
+          { label: '流程结构', value: layoutGraph(p.nodes).cols.length + ' 阶段', note: p.agents.length ? p.agents.length + ' 个子智能体协作' : '单角色执行' },
+          { label: '表格与产物', value: p.nodes.filter(n => n.table).length + ' 表 / ' + p.nodes.reduce((s, n) => s + n.artifacts.length, 0) + ' 附件', note: '支持筛选、排序与预览' }
+        ] : []);
+    if (metricsList.length) {
+      h += '<div class="wfv-metrics" aria-label="核心指标">' + metricsList.map(m => '<div class="wfv-metric"><span class="wfv-metric-label">' + esc(m.label) + '</span><strong class="wfv-metric-val">' + esc(m.value) + '</strong>' + (m.note ? '<span class="wfv-metric-note">' + esc(m.note) + '</span>' : '') + '</div>').join('') + '</div>';
     }
     if (auto && total) h += '<p class="wfv-note">以上结论是从原文自动摘录的，未经模型整理，建议对照下方详情阅读。</p>';
     if (total) {

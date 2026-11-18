@@ -107,7 +107,8 @@
     const gist = clip(gistRaw, LIMITS.gist);
     let points = bullets.length ? bullets : headings.length > 1 ? headings : paras.slice(1).map(firstSentence);
     points = [...new Set(points.map(p => clip(p, LIMITS.point)))].filter(p => p && p !== gist).slice(0, LIMITS.points);
-    const risks = lines.map(plain).filter(l => /(风险|注意|待定|待确认|不确定|需确认|尚未|矛盾)/.test(l)).map(l => clip(l, LIMITS.caveat));
+    const riskHeading = /^(假设与风险|风险与假设|风险|注意事项|待确认项?)[：:]*$/;
+    const risks = lines.filter(l => !/^\|/.test(l) && !/^#{1,6}\s/.test(l)).map(plain).filter(l => l && !riskHeading.test(l) && /(风险|注意|待定|待确认|不确定|需确认|尚未|矛盾)/.test(l)).map(l => clip(l, LIMITS.caveat));
     return { gist, points, risks };
   }
 
