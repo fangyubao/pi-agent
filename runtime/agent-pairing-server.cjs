@@ -87,11 +87,15 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '',
     '### 路径 B（适合本身是 MCP Client、无独立网关/CLI 入口的 Agent）：MCP 在线接力',
     '1. 加载或连接 `mcp-config.json`（或使用 `mcpUrl`），调用 `pi_workbench_check_compatibility` 完成前置校验；',
-    '2. 调用 `pi_workbench_register_agent` 提交：',
+    '2. 调用 `pi_workbench_register_agent` 提交（`models` 至少填入你当前正在使用的真实模型 ID）：',
     '```json',
     '{"name":"当前 MCP Agent","agentTransport":"mcp-relay","models":["你当前正在使用的真实模型ID"]}',
     '```',
-    '3. 拿到返回的 `profileId` 后，持续调用 `pi_workbench_await_task` 接取任务并用 `pi_workbench_submit_result` 返回结果；在工作台模式下可直接调用同一 MCP 连接里的 `workbench_action`。',
+    '3. **关键：拿到返回的 `profileId` 后不要结束本轮回复！** 请立刻进入持续接单循环（否则 Pi Workbench 超过 65 秒无轮询会判定离线并请求失败）：',
+    '   - 调用 `pi_workbench_await_task(profileId, timeoutMs: 25000)` 挂起等待任务；',
+    '   - 若返回 `idle: true`（暂无任务），**不要向用户回复并结束对话**，立即再次调用 `pi_workbench_await_task` 保持在线；',
+    '   - 若返回 `idle: false` 接到 `task`：按 `task.system` 与 `task.user` 执行（工作台模式可直接调用 `workbench_action`；若 `task.model` 非空且与你当前模型不同而你无法切换，必须以 `isError: true` 回传原因），完成后调用 `pi_workbench_submit_result`，随后**继续调用 `pi_workbench_await_task`** 接下一单；',
+    '   - 仅当用户明确叫停或宿主工具调用次数达到上限被迫暂停时，才向用户说明“已暂停接力轮询，如需继续派单请回复让我继续接单”。',
     '',
     '### 发送方式二选一',
     '- **MCP 工具调用**：挂载本目录 `mcp-config.json` 后调用 `pi_workbench_register_agent`；',
@@ -106,7 +110,9 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '- 连全量列表和当前模型 ID 都无法确定时，才返回空数组并说明原因；不要把记忆中的厂商型号当作当前可用列表。',
     '',
     '## 四、能力实测与界面状态刷新',
-    'Pi Workbench 收到注册后会立即返回 `{"ok":true,...}` 登记回执，并立刻在桌面端后台执行**四级能力实测**（普通聊天、工作流会话隔离与并发、**工作台工具 workbench 是否可用**），桌面端客户端界面会自动实时刷新结果与工作台可用标识。拿到 `ok: true` 后直接简洁告知用户即可，无需等待后台探测完成。',
+    'Pi Workbench 收到注册后会立即返回 `{"ok":true,...}` 登记回执，并立刻在桌面端后台执行**四级能力实测**（普通聊天、工作流会话隔离与并发、**工作台工具 workbench 是否可用**），桌面端客户端界面会自动实时刷新结果与工作台可用标识。',
+    '- **路径 A（网关 / CLI / HTTP 服务）**：拿到 `ok: true` 后直接简洁告知用户即可，无需等待后台探测完成。',
+    '- **路径 B（`mcp-relay` 在线接力）**：拿到 `profileId` 后**不要结束回复**，必须按路径 B 第 3 步持续循环调用 `pi_workbench_await_task` 挂起接单，保持在线状态。',
     ''
   ].join('\n');
 
@@ -114,12 +120,13 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     ? [
         `请先读取本地接入说明文件：${connectDocPath}`,
         '按其中的前置过滤规则自行判断当前环境是否满足接入条件（不满足请直接告知用户并停止，不要编造成功）；',
-        '若符合条件，请直接使用同目录下的 MCP（mcp-config.json / mcp-server.cjs）或配对凭证（pairing.json）自主完成连接与注册。',
-        '接入后 Pi Workbench 会自动实测工作流并发与是否支持工作台，并自动刷新界面状态；完成后按实际返回的能力向用户汇报即可。'
+        '若符合条件，请直接使用同目录下的 MCP（mcp-config.json / mcp-server.cjs）或配对凭证（pairing.json）自主完成连接与注册（务必上报真实模型列表或至少当前在用模型 ID）。',
+        '若是网关/CLI/API 方式，完成后向用户汇报即可；若是 mcp-relay（MCP 在线接力），拿到 profileId 后请勿结束回复，立即持续循环调用 pi_workbench_await_task 挂起接单（idle 时继续 await）并用 pi_workbench_submit_result 回传结果。'
       ].join('\n')
     : [
         `请读取本次 Pi Workbench 接入端点与 MCP Server：${mcpUrl}（或 HTTP 注册地址 ${registerUrl}，Token: ${token}）。`,
-        '先判断是否具备连接本地 MCP 或访问 127.0.0.1 的能力，不符合请直接停止；符合则通过 `pi_workbench_register_agent` 或 POST 注册，Pi Workbench 会自动检测是否支持工作台并刷新状态。'
+        '先判断是否具备连接本地 MCP 或访问 127.0.0.1 的能力，不符合请直接停止；符合则通过 `pi_workbench_register_agent` 或 POST 注册（务必上报真实模型列表或至少当前在用模型 ID）。',
+        '若是 mcp-relay（MCP 在线接力），拿到 profileId 后请勿结束回复，立即持续循环调用 pi_workbench_await_task 挂起接单并用 pi_workbench_submit_result 回传结果。'
       ].join('\n');
 
   return {
