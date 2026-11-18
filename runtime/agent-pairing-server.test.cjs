@@ -146,3 +146,20 @@ test('部署 Connect 目录生成的 mcp-config.json：stdio MCP 过滤 + 注册
     fs.rmSync(bundleDir, { recursive: true, force: true });
   }
 });
+
+
+test('模型更新支持 HTTP 和 MCP，错误令牌不能更新', async () => {
+  const updates=[];
+  const srv=createPairingServer({onUpdateModels:async p=>{updates.push(p);return {profileId:p.profileId,count:p.models.length};}});
+  try {
+    const info=await srv.startSession();
+    const post=(url,body,token=info.token)=>fetch(url,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:JSON.stringify(body)});
+    const payload={profileId:'relay-1',models:['model-a','model-b']};
+    assert.equal((await post(info.baseUrl+'/pair/update-models',payload,'wrong')).status,401);
+    assert.equal(updates.length,0);
+    assert.equal((await (await post(info.baseUrl+'/pair/update-models',payload)).json()).count,2);
+    const rpc=await (await post(info.mcpUrl,{jsonrpc:'2.0',id:1,method:'tools/call',params:{name:'pi_workbench_update_models',arguments:payload}})).json();
+    assert.equal(JSON.parse(rpc.result.content[0].text).count,2);
+    assert.equal(updates.length,2);
+  } finally {await srv.close();}
+});

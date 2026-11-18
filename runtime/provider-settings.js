@@ -51,17 +51,48 @@ window.PiProviderSettings = (() => {
       config = event.config;
       profiles = config.profiles || [];
       if (event.addedProfileId) {
-        const wbLabel = event.workbenchAvailable || event.capabilities?.workbench ? '工作台可用 ✓' : '工作台不可用 ✕（仅对话/工作流）';
         draft = null;
         selectedId = event.addedProfileId;
+        if (event.probing) {
+          pairingInfo = {
+            ...(pairingInfo || {}),
+            state: { status: 'probing', profileId: event.addedProfileId, name: event.name, capabilities: event.capabilities }
+          };
+          status = '⏳ 源 Agent「' + (event.name || '') + '」已登记，正在后台自动实测对话、工作流与工作台支持情况…';
+          onChange(config);
+          draw();
+          notify('已收到「' + (event.name || '外部 Agent') + '」接入请求，正在自动检测能力…');
+        } else {
+          const wbLabel = event.workbenchAvailable || event.capabilities?.workbench ? '工作台可用 ✓' : '工作台不可用 ✕（仅对话/工作流）';
+          pairingInfo = {
+            ...(pairingInfo || {}),
+            state: { status: 'connected', profileId: event.addedProfileId, name: event.name, capabilities: event.capabilities }
+          };
+          status = '✅ 源 Agent「' + (event.name || '') + '」已自主连入 · ' + wbLabel;
+          onChange(config);
+          draw();
+          notify('已连入：' + (event.name || '外部 Agent') + '（' + wbLabel + '）');
+        }
+      } else if (event.modelsProfileId) {
+        if (selectedId === event.modelsProfileId) {
+          const updated = profiles.find(x => x.id === event.modelsProfileId);
+          if (updated) available.set(updated.id, updated.discoveredModels || updated.models || []);
+          status = '已获取「' + (event.name || '') + '」的 ' + (event.modelCount || 0) + ' 个模型，请在下方槽位选择常用的 4 个';
+          onChange(config);
+          draw();
+        } else onChange(config);
+      } else if (event.probedProfileId) {
+        const wbLabel = event.workbenchAvailable || event.capabilities?.workbench ? '工作台可用 ✓' : '工作台不可用 ✕（仅对话/工作流）';
+        draft = null;
+        selectedId = event.probedProfileId;
         pairingInfo = {
           ...(pairingInfo || {}),
-          state: { status: 'connected', profileId: event.addedProfileId, name: event.name, capabilities: event.capabilities }
+          state: { status: 'connected', profileId: event.probedProfileId, name: event.name, capabilities: event.capabilities }
         };
-        status = '✅ 源 Agent「' + (event.name || '') + '」已自主连入 · ' + wbLabel;
+        status = '✅ 源 Agent「' + (event.name || '') + '」能力实测完成 · ' + wbLabel;
         onChange(config);
         draw();
-        notify('已连入：' + (event.name || '外部 Agent') + '（' + wbLabel + '）');
+        notify('实测完成：' + (event.name || '外部 Agent') + '（' + wbLabel + '）');
       }
     });
 
@@ -131,6 +162,7 @@ window.PiProviderSettings = (() => {
           baseUrl: transport === 'openclaw-gateway' ? (urlEl?.value.trim() || '') : '',
           command: transport === 'external-cli' ? (cmdEl?.value.trim() || '') : '',
           args: transport === 'external-cli' ? parseArgsInput(argsEl?.value || '') : [],
+          modelsCommand: transport === 'external-cli' ? (root.querySelector('#provider-cli-models-command')?.value.trim() || '') : '',
           promptMode: promptEl?.value === 'arg' ? 'arg' : 'stdin',
           mcpSupport: transport === 'openclaw-gateway' ? 'none' : (transport === 'mcp-relay' ? 'mcp-config' : (mcpEl?.value === 'none' ? 'none' : 'mcp-config')),
           capabilities: nextCapabilities,
@@ -222,14 +254,17 @@ window.PiProviderSettings = (() => {
 
     function pairingCardHtml(p, isDraft) {
       const st = pairingInfo?.state || { status: 'waiting' };
-      const connected = st.status === 'connected' || !isDraft;
+      const probing = st.status === 'probing';
+      const connected = st.status === 'connected' || (!isDraft && !probing);
       const caps = capsApi().normalizeCapabilities((st.profileId === p.id ? st.capabilities : null) || p.capabilities, p);
-      const wbText = caps.mode === 'unprobed' ? '工作台支持：待检测' : (caps.workbench ? '工作台：可用 ✓' : '工作台：不可用 ✕');
-      const statusText = st.status === 'connected'
-        ? ('已连入：' + (st.name || p.name || '外部 Agent') + ' · ' + wbText)
-        : (!isDraft ? (p.name + ' · ' + wbText) : (pairingInfo?.port ? '本地 Connect MCP 已就绪 · 等待源 Agent 连接…' : '正在准备本地 Connect MCP 目录…'));
+      const wbText = caps.mode === 'unprobed' ? '工作台支持：正在实测' : (caps.workbench ? '工作台：可用 ✓' : '工作台：不可用 ✕');
+      const statusText = probing
+        ? ('已登记：' + (st.name || p.name || '外部 Agent') + ' · 正在自动实测工作台等能力…')
+        : st.status === 'connected'
+          ? ('已连入：' + (st.name || p.name || '外部 Agent') + ' · ' + wbText)
+          : (!isDraft ? (p.name + ' · ' + wbText) : (pairingInfo?.port ? '本地 Connect MCP 已就绪 · 等待源 Agent 连接…' : '正在准备本地 Connect MCP 目录…'));
       return '<section class="pairing-card" id="provider-pairing-panel">' +
-        '<div class="pairing-head"><strong>Agent Connect MCP（文件指引 + 自主接入）</strong><span id="provider-pairing-status" class="pairing-status ' + (connected && caps.mode !== 'unprobed' ? 'connected' : 'waiting') + '">' + esc(statusText) + '</span></div>' +
+        '<div class="pairing-head"><strong>Agent Connect MCP（文件指引 + 自主接入）</strong><span id="provider-pairing-status" class="pairing-status ' + (!probing && connected && caps.mode !== 'unprobed' ? 'connected' : 'waiting') + '">' + esc(statusText) + '</span></div>' +
         '<p class="pairing-desc">软件已在本机自动部署 Connect MCP 包（内含 <code>CONNECT.md</code> 说明、<code>mcp-config.json</code> 与零依赖 <code>mcp-server.cjs</code>）。只需复制下方简短提示词发给具备“读文件”和“MCP / 终端”能力的源 Agent，它就会自行判断是否满足要求并完成接入；连接后本页面与工作台可用状态会立即自动刷新。</p>' +
         '<div class="pairing-actions">' +
         '<button type="button" class="button primary" id="provider-copy-prompt"' + (pairingInfo?.prompt ? '' : ' disabled') + '>复制极简接入提示词</button>' +
@@ -245,7 +280,7 @@ window.PiProviderSettings = (() => {
     function modelSlotsHtml(p, all, chosen, heading) {
       const isExt = capsApi().isExternalAgent(p);
       return '<div class="provider-model-heading"><strong>' + heading + '</strong>' +
-        (isExt ? '' : '<button type="button" class="button" id="refresh-models">刷新厂商模型</button>') +
+        '<button type="button" class="button" id="refresh-models">' + (isExt ? '刷新模型列表' : '刷新厂商模型') + '</button>' +
         '</div><p class="provider-status" id="provider-status" role="status">' + esc(status || ('已选 ' + chosen.length + ' / 4 个')) + '</p>' +
         '<div class="provider-slots">' + Array.from({ length: 4 }, (_, i) => {
           const selectedModel = chosen[i];
@@ -285,6 +320,7 @@ window.PiProviderSettings = (() => {
         endpointFields = '<label class="dialog-label">CLI 启动命令<input class="dialog-input" id="provider-cli-command" value="' + esc(p.command || '') + '" placeholder="例如 claude、codex、node 或可执行文件路径" required></label>' +
           '<label class="dialog-label">固定命令行参数（空格分隔）<input class="dialog-input" id="provider-cli-args" value="' + esc(formatArgsInput(p.args)) + '" placeholder="例如 --print --output-format stream-json"></label>' +
           '<label class="dialog-label">指令传入方式<select class="dialog-input" id="provider-cli-prompt-mode"><option value="stdin"' + (p.promptMode !== 'arg' ? ' selected' : '') + '>标准输入（stdin，推荐长上下文）</option><option value="arg"' + (p.promptMode === 'arg' ? ' selected' : '') + '>追加在命令行末尾</option></select></label>' +
+          '<label class="dialog-label">模型列表命令（可选，用于自动获取模型）<input class="dialog-input" id="provider-cli-models-command" value="' + esc(p.modelsCommand || '') + '" placeholder="例如 opencode models"></label>' +
           '<label class="dialog-label">工作台 MCP 桥接<select class="dialog-input" id="provider-cli-mcp-support"><option value="mcp-config"' + (p.mcpSupport !== 'none' ? ' selected' : '') + '>自动挂载工作台 MCP（PI_WORKBENCH_MCP_CONFIG）</option><option value="none"' + (p.mcpSupport === 'none' ? ' selected' : '') + '>不挂载 MCP（纯对话 / 工作流）</option></select></label>' +
           '<label class="dialog-label">Agent 令牌 / 密钥（可选，注入 PI_EXTERNAL_AGENT_TOKEN）<div class="provider-key-control"><input class="dialog-input" id="provider-key" type="password" autocomplete="new-password" placeholder="' + (p.hasApiKey ? '已安全保存；留空不修改' : '不需要可留空') + '"><button type="button" class="provider-key-toggle" id="provider-key-toggle" aria-pressed="false" aria-label="显示令牌" title="显示令牌"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M2.5 12s3.4-6 9.5-6 9.5 6 9.5 6-3.4 6-9.5 6-9.5-6-9.5-6Z"></path><circle cx="12" cy="12" r="2.5"></circle></svg></button></div></label>';
       } else {
@@ -321,7 +357,7 @@ window.PiProviderSettings = (() => {
       displayed = p;
       const isExt = capsApi().isExternalAgent(p);
       if (isExt && !pairingInfo?.prompt && !pairingBusy) void ensurePairing(false);
-      const found = available.get(p.id) || p.models || (isExt ? ['main'] : []);
+      const found = available.get(p.id) || p.discoveredModels || p.models || (isExt ? ['main'] : []);
       const all = [...new Set([...found, ...(p.models || []), ...(p.model ? [p.model] : [])])];
       const chosen = (p.models?.length ? p.models : [p.model].filter(Boolean)).slice(0, 4);
 
@@ -494,14 +530,20 @@ window.PiProviderSettings = (() => {
 
       const refreshBtn = root.querySelector('#refresh-models');
       if (refreshBtn) refreshBtn.onclick = async () => {
-        const form = readForm(), key = root.querySelector('#provider-key').value;
-        root.querySelector('#provider-status').textContent = '正在读取厂商模型…';
-        const result = await window.PiProviderManager.listModels(form);
-        if (!result.ok) { root.querySelector('#provider-status').textContent = result.error; return; }
+        const form = readForm(), keyEl = root.querySelector('#provider-key'), key = keyEl ? keyEl.value : '';
+        const statusEl = root.querySelector('#provider-status');
+        refreshBtn.disabled = true;
+        statusEl.textContent = isExt ? '正在向外部 Agent 获取真实模型列表（最长 30 秒）…' : '正在读取厂商模型…';
+        let result;
+        try { result = await window.PiProviderManager.listModels(form); }
+        finally { if (refreshBtn.isConnected) refreshBtn.disabled = false; }
+        if (!root.isConnected) return;
+        if (!result.ok) { statusEl.textContent = result.error; return; }
         available.set(p.id, result.models || []);
-        status = result.manualOnly ? '接口未提供模型列表，请手动添加模型 ID' : '已读取 ' + (result.models || []).length + ' 个模型，请在四个模型槽中选择';
+        status = result.manualOnly ? (result.hint || '接口未提供模型列表，请手动添加模型 ID') : '已读取 ' + (result.models || []).length + ' 个模型，请在四个模型槽中选择';
         const next = { ...p, ...form, id: p.id, models: form.models.length ? form.models : (result.models || []).slice(0, 4), modelMetadata: { ...(p.modelMetadata || {}), ...(result.modelMetadata || {}) } };
-        draw(next); root.querySelector('#provider-key').value = key;
+        draw(next);
+        const keyAfter = root.querySelector('#provider-key'); if (keyAfter) keyAfter.value = key;
       };
 
       root.querySelector('#provider-import').onclick = () => {

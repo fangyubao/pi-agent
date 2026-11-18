@@ -136,6 +136,8 @@ function publicProfile(profile = {}) {
     provider: profile.provider || (external ? transport : 'openai-compatible'),
     baseUrl: profile.baseUrl !== undefined ? profile.baseUrl : defaultBase,
     command: String(profile.command || ''),
+    modelsCommand: String(profile.modelsCommand || ''),
+    discoveredModels: Array.isArray(profile.discoveredModels) ? profile.discoveredModels.slice(0, 200) : [],
     args: Array.isArray(profile.args) ? profile.args.slice(0, 24) : [],
     promptMode: profile.promptMode === 'arg' ? 'arg' : 'stdin',
     mcpSupport: profile.mcpSupport === 'none' ? 'none' : 'mcp-config',
@@ -213,6 +215,8 @@ async function effectiveProvider(input = {}) {
     provider: String(input.provider || selected.provider || (external ? agentTransport : 'openai-compatible')),
     baseUrl: normalizedBase,
     command: String(input.command !== undefined ? input.command : (selected.command || '')),
+    modelsCommand: String(input.modelsCommand !== undefined ? input.modelsCommand : (selected.modelsCommand || '')),
+    discoveredModels: Array.isArray(selected.discoveredModels) ? selected.discoveredModels.slice(0, 200) : [],
     args: Array.isArray(input.args) ? input.args.slice(0, 24) : (Array.isArray(selected.args) ? selected.args : []),
     promptMode: (input.promptMode || selected.promptMode) === 'arg' ? 'arg' : 'stdin',
     mcpSupport: (input.mcpSupport || selected.mcpSupport) === 'none' ? 'none' : 'mcp-config',
@@ -1073,6 +1077,7 @@ if(primaryInstance)app.whenReady().then(() => {
       provider: isExternal ? agentTransport : String(input.provider || previous.provider || 'openai-compatible'),
       baseUrl: cleanUrl(rawUrl, isExternal),
       command: isExternal ? String(input.command !== undefined ? input.command : (previous.command || '')) : '',
+      modelsCommand: isExternal ? String(input.modelsCommand !== undefined ? input.modelsCommand : (previous.modelsCommand || '')).slice(0, 300) : '',
       args: isExternal ? parsedArgs : [],
       promptMode: isExternal ? ((input.promptMode || previous.promptMode) === 'arg' ? 'arg' : 'stdin') : 'stdin',
       mcpSupport: isExternal ? ((input.mcpSupport || previous.mcpSupport) === 'none' ? 'none' : 'mcp-config') : 'none',
@@ -1126,8 +1131,19 @@ if(primaryInstance)app.whenReady().then(() => {
     try {
       const cfg = await effectiveProvider(input);
       if (providerCapabilities.isExternalAgent(cfg)) {
-        const models = [...new Set([...(Array.isArray(cfg.models) ? cfg.models : []), ...(cfg.model ? [cfg.model] : [])])];
-        return { ok: true, models: models.length ? models : ['main'], manualOnly: true, provider: cfg.agentTransport || cfg.provider };
+        let found = null, discoverError = '';
+        try {
+          found = await externalAgent.listAgentModels(cfg, { relayDispatch: relayDispatchViaServer, timeoutMs: 30000 });
+        } catch (err) { discoverError = String(err?.message || err); }
+        if (found && found.length) {
+          const doc = await saveDiscoveredModels(cfg.profileId, found);
+          if (doc) broadcastProviderModels(doc, cfg.profileId, cfg.name || '', found.length);
+          return { ok: true, models: found, provider: cfg.agentTransport || cfg.provider };
+        }
+        if (discoverError) return { ok: false, models: [], error: '自动获取模型列表失败：' + discoverError };
+        const known = [...new Set([...(Array.isArray(cfg.discoveredModels) ? cfg.discoveredModels : []), ...(Array.isArray(cfg.models) ? cfg.models : []), ...(cfg.model ? [cfg.model] : [])])];
+        const hint = cfg.agentTransport === 'external-cli' ? '该 CLI 未配置“模型列表命令”（如 opencode models），请填写后重试，或手动添加模型 ID' : '该接入方式暂不能自动枚举模型，请让源 Agent 调用 pi_workbench_update_models 上报，或手动添加模型 ID';
+        return { ok: true, models: known.length ? known : ['main'], manualOnly: true, hint, provider: cfg.agentTransport || cfg.provider };
       }
       return await requestModels(input);
     } catch (error) { return { ok: false, models: [], error: error.message }; }
@@ -1136,7 +1152,7 @@ if(primaryInstance)app.whenReady().then(() => {
     try {
       const cfg = await effectiveProvider(input);
       if (providerCapabilities.isExternalAgent(cfg)) {
-        const res = await externalAgent.probeCapabilities(cfg, { timeoutMs: 25000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
+        const res = await externalAgent.probeCapabilities(cfg, { timeoutMs: 45000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
         return { ok: res.ok, message: res.capabilities?.checks?.chat || '外部 Agent 连接正常', error: res.error, capabilities: res.capabilities };
       }
       return await require('./runtime/provider-probe.cjs').probe(cfg);
@@ -1146,7 +1162,7 @@ if(primaryInstance)app.whenReady().then(() => {
     try {
       checkShell(event);
       const cfg = await effectiveProvider(input);
-      return await externalAgent.probeCapabilities(cfg, { timeoutMs: 30000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
+      return await externalAgent.probeCapabilities(cfg, { timeoutMs: 45000, relayOnline: pid => pairingServer?.isRelayOnline(pid) });
     } catch (error) { return { ok: false, error: agentRecovery.redact(error.message) }; }
   });
   function invokeBridgeRequest(command, payload = {}) {
@@ -1191,9 +1207,43 @@ if(primaryInstance)app.whenReady().then(() => {
       }
     });
   }
+  const relayDispatchViaServer = (pid, req) => pairingServer ? pairingServer.dispatchRelayTask(pid, req) : Promise.reject(new Error('MCP 配对服务未启动'));
+  // 保存外部 Agent 探测/上报到的完整模型列表；常用槽位还是占位值（main / relay-main / 空）时，自动换成前 4 个真实模型。
+  async function saveDiscoveredModels(id, models) {
+    const list = [...new Set((Array.isArray(models) ? models : []).map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+    if (!list.length) return null;
+    return serializeProviderWrite(async () => {
+      const old = await readProviderConfig();
+      const profiles = providerProfiles(old).map(x => ({ ...x }));
+      const idx = profiles.findIndex(x => x.id === id);
+      if (idx < 0) return null;
+      const p = profiles[idx];
+      const placeholder = !(p.models || []).length || (p.models || []).every(m => ['main', 'relay-main'].includes(m));
+      p.discoveredModels = list;
+      if (placeholder) { p.models = list.slice(0, 4); p.model = p.models[0] || ''; }
+      profiles[idx] = p;
+      const document = { schema: 2, activeProfileId: old.activeProfileId || profiles[0]?.id || id, profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
+      await storeProviderConfig(document);
+      return document;
+    });
+  }
+  function broadcastProviderModels(document, id, name, count) {
+    const pub = publicConfig(document);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('provider:updated', { config: pub, modelsProfileId: id, name, modelCount: count });
+    }
+  }
   function getPairingServer() {
     if (pairingServer) return pairingServer;
     pairingServer = createPairingServer({
+      async onUpdateModels(payload = {}) {
+        const id = String(payload.profileId || '').trim();
+        const doc = await saveDiscoveredModels(id, payload.models);
+        if (!doc) throw new Error('找不到已注册的 Agent（profileId 无效）或 models 为空：' + id);
+        const prof = providerProfiles(doc).find(x => x.id === id);
+        broadcastProviderModels(doc, id, prof?.name || '', (prof?.discoveredModels || []).length);
+        return { profileId: id, count: (prof?.discoveredModels || []).length, selected: prof?.models || [] };
+      },
       nodePath: process.execPath,
       bundleDir: path.join(app.getPath('userData'), 'agent-connect'),
       mcpScriptPath: path.join(__dirname, 'runtime', 'workbench-mcp-server.cjs').replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked'),
@@ -1208,7 +1258,8 @@ if(primaryInstance)app.whenReady().then(() => {
         const fallbackUrl = external ? (transport === 'openclaw-gateway' ? 'ws://127.0.0.1:18789' : '') : 'https://api.openai.com/v1';
         const baseUrl = cleanUrl(payload.baseUrl !== undefined ? payload.baseUrl : fallbackUrl, external);
         const rawModels = Array.isArray(payload.models) ? payload.models.map(x => String(x || '').trim()).filter(Boolean) : [];
-        const models = rawModels.length ? [...new Set(rawModels)].slice(0, 4) : [transport === 'mcp-relay' ? 'relay-main' : 'main'];
+        const allModels = [...new Set(rawModels)].slice(0, 200);
+        const models = allModels.length ? allModels.slice(0, 4) : [transport === 'mcp-relay' ? 'relay-main' : 'main'];
         const id = String(payload.profileId || payload.id || ('agent-' + require('node:crypto').randomBytes(4).toString('hex')));
         const rawKey = String(payload.apiKey || payload.token || '').trim();
         const candidate = {
@@ -1220,6 +1271,7 @@ if(primaryInstance)app.whenReady().then(() => {
           provider: external ? transport : String(payload.provider || 'openai-compatible'),
           baseUrl,
           command: external && transport === 'external-cli' ? String(payload.command || '').trim() : '',
+          modelsCommand: external && transport === 'external-cli' ? String(payload.modelsCommand || '').trim().slice(0, 300) : '',
           args: external && transport === 'external-cli' ? externalAgent.parseArgsList(payload.args).slice(0, 24) : [],
           promptMode: payload.promptMode === 'arg' ? 'arg' : 'stdin',
           mcpSupport: payload.mcpSupport === 'none' ? 'none' : 'mcp-config',
@@ -1229,7 +1281,8 @@ if(primaryInstance)app.whenReady().then(() => {
         };
 
         let capabilities;
-        if (transport === 'mcp-relay') {
+        const probing = transport !== 'mcp-relay';
+        if (!probing) {
           capabilities = providerCapabilities.normalizeCapabilities({
             chat: true,
             workflow: true,
@@ -1246,12 +1299,7 @@ if(primaryInstance)app.whenReady().then(() => {
             }
           }, candidate);
         } else {
-          const probeRes = await externalAgent.probeCapabilities(candidate, { timeoutMs: 25000 }).catch(err => ({
-            ok: false,
-            error: err.message,
-            capabilities: providerCapabilities.defaultCapabilities(candidate)
-          }));
-          capabilities = probeRes.capabilities;
+          capabilities = providerCapabilities.defaultCapabilities(candidate);
         }
 
         const savedDoc = await serializeProviderWrite(async () => {
@@ -1273,6 +1321,8 @@ if(primaryInstance)app.whenReady().then(() => {
             provider: candidate.provider,
             baseUrl: candidate.baseUrl,
             command: candidate.command,
+            modelsCommand: candidate.modelsCommand,
+            discoveredModels: allModels.length ? allModels : (prev.discoveredModels || []),
             args: candidate.args,
             promptMode: candidate.promptMode,
             mcpSupport: candidate.mcpSupport,
@@ -1298,6 +1348,7 @@ if(primaryInstance)app.whenReady().then(() => {
             win.webContents.send('provider:updated', {
               config: pub,
               addedProfileId: id,
+              probing,
               name: candidate.name,
               agentTransport: transport,
               capabilities,
@@ -1306,7 +1357,48 @@ if(primaryInstance)app.whenReady().then(() => {
             });
           }
         }
-        return { profileId: id, name: candidate.name, agentTransport: transport, capabilities };
+
+        if (probing) {
+          void (async () => {
+            const probeRes = await externalAgent.probeCapabilities(candidate, { timeoutMs: 45000 }).catch(err => ({
+              ok: false,
+              error: err.message,
+              capabilities: providerCapabilities.normalizeCapabilities({ chat: false, workflow: false, workbench: false, mode: 'probed', checkedAt: Date.now(), checks: { chat: err.message } }, candidate)
+            }));
+            const probedCaps = probeRes.capabilities;
+            pairingServer?.markProbed?.(id, probedCaps);
+            const updatedDoc = await serializeProviderWrite(async () => {
+              const old = await readProviderConfig();
+              const profiles = providerProfiles(old).map(x => x.id === id ? { ...x, capabilities: probedCaps } : { ...x });
+              const document = { schema: 2, activeProfileId: old.activeProfileId || id, profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
+              await storeProviderConfig(document);
+              return document;
+            });
+            const updatedPub = publicConfig(updatedDoc);
+            for (const win of BrowserWindow.getAllWindows()) {
+              if (!win.isDestroyed()) {
+                win.webContents.send('provider:updated', {
+                  config: updatedPub,
+                  probedProfileId: id,
+                  name: candidate.name,
+                  agentTransport: transport,
+                  capabilities: probedCaps,
+                  workbenchAvailable: Boolean(probedCaps?.workbench),
+                  viaMcp: Boolean(meta.viaMcp)
+                });
+              }
+            }
+            // 注册时没上报模型、但给了“模型列表命令”：实测完成后自动拉取真实模型列表
+            if (!allModels.length && candidate.modelsCommand) {
+              try {
+                const found = await externalAgent.listAgentModels(candidate, { relayDispatch: relayDispatchViaServer, timeoutMs: 30000 });
+                const doc = found && found.length ? await saveDiscoveredModels(id, found) : null;
+                if (doc) broadcastProviderModels(doc, id, candidate.name, found.length);
+              } catch { /* 拉不到不影响接入，用户可在设置页点“刷新模型列表” */ }
+            }
+          })();
+        }
+        return { profileId: id, name: candidate.name, agentTransport: transport, capabilities, probing };
       }
     });
     return pairingServer;

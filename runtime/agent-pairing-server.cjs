@@ -75,10 +75,11 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '```json',
     '{"name":"OpenClaw Agent","agentTransport":"openclaw-gateway","baseUrl":"ws://127.0.0.1:18789","apiKey":"你的网关Token","models":["main"]}',
     '```',
-    '2. **命令行 CLI Agent**（如 `claude`、`codex`、`opencode` 或其他支持非交互模式的 CLI）：请填你真实的启动命令与非交互参数；若你支持通过 `--mcp-config` 等挂载工作台 MCP（以获得操作 Pi 工作台能力），设为 `"mcp-config"`，否则 `"none"`：',
+    '2. **命令行 CLI Agent**（如 `opencode`、`claude`、`codex` 等支持非交互模式的 CLI）：请填你真实的启动命令、非交互参数及当前可用模型（如果是 `opencode` 无付费 Key 时可用 `opencode/glm-5.3-flash-free` 等免费模型）。注意：只要你的 CLI 程序本身支持 MCP（例如 OpenCode 支持通过环境变量 `OPENCODE_CONFIG_CONTENT` 自动挂载、Claude/Codex 支持 `--mcp-config` / `PI_WORKBENCH_MCP_CONFIG`），即使当前会话尚未提前加载 MCP，**也请填写 `"mcpSupport":"mcp-config"`**——Pi Workbench 在调用与四级实测时会自动把工作台 MCP 注入给子进程，并由 `workbench_probe_ping` 实测决定工作台是否可用：',
     '```json',
-    '{"name":"你的 CLI Agent","agentTransport":"external-cli","command":"命令或绝对路径","args":["--print"],"promptMode":"stdin","mcpSupport":"mcp-config","models":["默认模型名"]}',
+    '{"name":"OpenCode Free","agentTransport":"external-cli","command":"opencode","args":["run","--format","json","--auto","--pure","-m","{model}"],"promptMode":"stdin","mcpSupport":"mcp-config","modelsCommand":"opencode models","models":["opencode/glm-5.3-flash-free","opencode/big-pickle"]}',
     '```',
+    '*(如果是 OpenCode 需要主动连入本目录 MCP，使用 `OPENCODE_CONFIG_CONTENT` 或 `opencode.json` 的 `{"mcp":{"pi-workbench-connect":{"type":"remote","url":"' + mcpUrl + '","enabled":true}}}`)*',
     '3. **本地兼容 OpenAI HTTP 服务**：',
     '```json',
     '{"name":"本地模型","kind":"api","provider":"openai-compatible","baseUrl":"http://127.0.0.1:端口/v1","apiKey":"密钥或local","models":["模型ID"]}',
@@ -96,8 +97,15 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     '- **MCP 工具调用**：挂载本目录 `mcp-config.json` 后调用 `pi_workbench_register_agent`；',
     `- **HTTP POST**：携带 \`Authorization: Bearer ${token}\` 与 \`Content-Type: application/json\` POST 到 \`${registerUrl}\`。`,
     '',
+    '## 三点五、模型列表（必须如实上报，否则用户在 Pi Workbench 里选不到模型）',
+    '- 注册时的 `models` 必须是你**当前真实可用于对话的全部模型 ID**（不要只写默认值，更不要编造）；请先从你自己的模型选择列表、配置文件或自带命令（例如 `opencode models`）里枚举。',
+    '- 若是命令行 Agent 且有列出模型的命令，请额外提交 `"modelsCommand":"opencode models"`（Pi Workbench 之后可自动刷新模型列表）。',
+    `- 之后模型有变动，可随时调用 MCP 工具 \`pi_workbench_update_models\`，或 POST \`${baseUrl}/pair/update-models\`（同样带 Bearer Token）提交 \`{"profileId":"注册回执里的 profileId","models":["模型A","模型B"]}\`。`,
+    '- 模型列表仅代表源 Agent 上报的目录，不等于已验证每个模型的可用性或切换能力。接力任务含 `model` 字段；若无法使用指定模型，必须以 `isError:true` 回传原因，不能静默使用其他模型。',
+    '- 无法枚举时请返回空数组并说明原因；不要把记忆中的厂商型号当作当前可用列表。可以保留当前会话入口，但不能据此宣称支持模型切换。',
+    '',
     '## 四、能力实测与界面状态刷新',
-    'Pi Workbench 收到注册后会**立即执行四级能力实测**（普通聊天、工作流会话隔离与并发、**工作台工具 workbench 是否可用**），随后客户端会**自动刷新显示接入结果与工作台可用标识**。请在收到 `{"ok":true,...}` 响应后将 `capabilities` 中的实际结果如实转告用户。',
+    'Pi Workbench 收到注册后会立即返回 `{"ok":true,...}` 登记回执，并立刻在桌面端后台执行**四级能力实测**（普通聊天、工作流会话隔离与并发、**工作台工具 workbench 是否可用**），桌面端客户端界面会自动实时刷新结果与工作台可用标识。拿到 `ok: true` 后直接简洁告知用户即可，无需等待后台探测完成。',
     ''
   ].join('\n');
 
@@ -154,6 +162,7 @@ async function writeConnectBundle(artifacts, sourceMcpScriptPath) {
 
 function createPairingServer({
   onRegister,
+  onUpdateModels,
   onWorkbenchAction,
   onReadTaskContext,
   onMemoryProposal,
@@ -204,13 +213,13 @@ function createPairingServer({
     const r = touchRelay(profileId);
     if (r.queue.length) {
       const task = r.queue.shift();
-      return Promise.resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, mode: task.mode } });
+      return Promise.resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, model: task.model || '', mode: task.mode } });
     }
     return new Promise(resolve => {
       let timer = null;
       const onTask = task => {
         clearTimeout(timer);
-        resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, mode: task.mode } });
+        resolve({ idle: false, task: { requestId: task.requestId, system: task.system, user: task.user, model: task.model || '', mode: task.mode } });
       };
       r.waiters.push(onTask);
       timer = setTimeout(() => {
@@ -234,7 +243,7 @@ function createPairingServer({
     return { ok: true, requestId };
   }
 
-  async function dispatchRelayTask(profileId, { system = '', user = '', mode = 'chat', timeoutMs = 180000, signal } = {}) {
+  async function dispatchRelayTask(profileId, { system = '', user = '', model = '', mode = 'chat', timeoutMs = 180000, signal } = {}) {
     const r = getRelay(profileId);
     if (Date.now() - (r.lastSeenAt || 0) > 65000 && r.waiters.length === 0) {
       throw new Error('MCP 在线接力连接已离线，请在源 Agent 中确认已连接 Pi Workbench MCP 并处于轮询接单状态');
@@ -268,6 +277,7 @@ function createPairingServer({
         requestId,
         system: String(system || ''),
         user: String(user || ''),
+        model: String(model || ''),
         mode: String(mode || 'chat'),
         resolve: val => { if (cleanup()) resolve(val); },
         reject: err => { if (cleanup()) reject(err); },
@@ -311,9 +321,22 @@ function createPairingServer({
           args: { type: 'array', items: { type: 'string' } },
           promptMode: { type: 'string', enum: ['stdin', 'arg'] },
           mcpSupport: { type: 'string', enum: ['mcp-config', 'none'] },
-          models: { type: 'array', items: { type: 'string' } }
+          modelsCommand: { type: 'string', description: '列出本 Agent 可用模型的命令，如 "opencode models"（可选，便于自动刷新）' },
+          models: { type: 'array', items: { type: 'string' }, description: '你当前真实可用的全部模型 ID，必须如实枚举，不要编造' }
         },
         required: ['name']
+      }
+    },
+    {
+      name: 'pi_workbench_update_models',
+      description: '更新已注册 Agent 的真实可用模型列表（模型有变化或注册时未能枚举时使用）。',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          profileId: { type: 'string', description: '注册回执返回的 profileId' },
+          models: { type: 'array', items: { type: 'string' } }
+        },
+        required: ['profileId', 'models']
       }
     },
     {
@@ -383,7 +406,7 @@ function createPairingServer({
       const result = await onRegister(payload, { viaMcp });
       if (payload?.agentTransport === 'mcp-relay' && result?.profileId) touchRelay(result.profileId);
       state = {
-        status: 'connected',
+        status: result?.probing ? 'probing' : 'connected',
         startedAt: state.startedAt || Date.now(),
         connectedAt: Date.now(),
         profileId: result.profileId || '',
@@ -412,6 +435,10 @@ function createPairingServer({
     }
     if (name === 'pi_workbench_register_agent') {
       return await handleRegistration(args, true);
+    }
+    if (name === 'pi_workbench_update_models') {
+      if (!onUpdateModels) throw new Error('当前无法更新模型列表');
+      return { ok: true, ...(await onUpdateModels(args || {})) };
     }
     if (name === 'pi_workbench_await_task') {
       return await awaitRelayTask(args.profileId, args.timeoutMs);
@@ -475,6 +502,16 @@ function createPairingServer({
       const tok = extractAuthToken(req, urlObj, body);
       if (!safeTokenMatch(tok, pairingToken)) {
         sendJson(401, { ok: false, error: '无效或已过期的配对令牌' });
+        return;
+      }
+
+      if (urlObj.pathname === '/pair/update-models') {
+        try {
+          if (!onUpdateModels) throw new Error('当前无法更新模型列表');
+          sendJson(200, { ok: true, ...(await onUpdateModels(body || {})) });
+        } catch (err) {
+          sendJson(400, { ok: false, error: String(err?.message || err) });
+        }
         return;
       }
 
@@ -582,9 +619,16 @@ function createPairingServer({
     }
   }
 
+  function markProbed(profileId, capabilities) {
+    if (String(state.profileId || '') === String(profileId || '')) {
+      state = { ...state, status: 'connected', capabilities: capabilities || state.capabilities };
+    }
+  }
+
   return {
     startSession,
     getInfo,
+    markProbed,
     dispatchRelayTask,
     isRelayOnline,
     close

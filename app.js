@@ -2037,7 +2037,7 @@
   for(const [id,name] of [['nav-sidebar','sidebar'],['nav-back','back'],['nav-forward','forward']]){const el=$('#'+id);if(el)el.innerHTML=icon(name);}
   if(state.settings.sidebarCollapsed)toggleSidebar(true);
   render();navRecord();updateAgentChrome();maybeShowFirstLaunch();void loadProviderCatalog(false);setTimeout(restoreTaskWorkbench,0);
-  window.PiProviderManager.onUpdated?.(ev=>{if(!ev?.config)return;providerRuntime.config={...providerRuntime.config,...ev.config};void syncProfileForMode(current(),{silent:true}).then(()=>{if(route==='chat')refreshComposerProviders(current());});void pushWorkflowModels();if(ev.addedProfileId)notify('已自主接入 '+ev.name+(ev.workbenchAvailable?'（工作台可用 ✓）':'（不支持工作台，仅对话/工作流）'));});
+  window.PiProviderManager.onUpdated?.(ev=>{if(!ev?.config)return;providerRuntime.config={...providerRuntime.config,...ev.config};void syncProfileForMode(current(),{silent:true}).then(()=>{if(route==='chat')refreshComposerProviders(current());});void pushWorkflowModels();if(ev.probedProfileId||(ev.addedProfileId&&!ev.probing))notify('已接入 '+ev.name+(ev.workbenchAvailable?'（工作台可用 ✓）':'（不支持工作台，仅对话/工作流）'));});
   function fillIcons(){document.querySelectorAll('[data-icon]').forEach(n=>n.innerHTML=icon(n.dataset.icon));}
   openDeepLink();
 })();

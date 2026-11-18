@@ -1,5 +1,6 @@
 'use strict';
 const fs = require('node:fs/promises');
+const fsSync = require('node:fs');
 const http = require('node:http');
 const os = require('node:os');
 const path = require('node:path');
@@ -264,6 +265,19 @@ function parseArgsList(raw) {
   return text.split(/\r?\n/).map(x => x.trim()).filter(Boolean);
 }
 
+function resolveCliExecutable(bin) {
+  const cmd = String(bin || '').trim();
+  if (process.platform !== 'win32' || !cmd || /[\\/]/.test(cmd) || /\.[A-Za-z0-9]{1,8}$/.test(cmd)) return cmd;
+  const dirs = String(process.env.PATH || '').split(';').filter(Boolean);
+  for (const dir of dirs) {
+    for (const ext of ['.exe', '.cmd', '.bat']) {
+      const candidate = path.join(dir, cmd + ext);
+      try { if (fsSync.statSync(candidate).isFile()) return candidate; } catch {}
+    }
+  }
+  return cmd;
+}
+
 function parseCliStreamChunk(line) {
   const trimmed = String(line || '').trim();
   if (!trimmed) return null;
@@ -272,12 +286,14 @@ function parseCliStreamChunk(line) {
     const obj = JSON.parse(trimmed);
     if (obj.type === 'content_block_delta' && typeof obj.delta?.text === 'string') return { delta: obj.delta.text, json: true };
     if (obj.type === 'message_update' && obj.assistantMessageEvent?.type === 'text_delta') return { delta: String(obj.assistantMessageEvent.delta || ''), json: true };
+    if (obj.type === 'text' && typeof obj.part?.text === 'string') return { delta: obj.part.text, json: true };
     if (typeof obj.delta === 'string') return { delta: obj.delta, json: true };
     if (obj.type === 'assistant' && Array.isArray(obj.message?.content)) {
       return { final: obj.message.content.filter(c => c.type === 'text').map(c => c.text).join(''), json: true };
     }
     if (obj.type === 'result' && typeof obj.result === 'string') return { final: obj.result, json: true };
     if (typeof obj.text === 'string') return { final: obj.text, json: true };
+    if (obj.type === 'error' && obj.error) throw new Error(typeof obj.error === 'string' ? obj.error : obj.error.message || JSON.stringify(obj.error));
     if (obj.error) throw new Error(typeof obj.error === 'string' ? obj.error : obj.error.message || JSON.stringify(obj.error));
     return { json: true };
   } catch (err) {
@@ -338,7 +354,12 @@ async function cliExchange({
       '{approval}': String(approval || 'ask')
     };
     const finalArgs = [];
-    for (const item of argTemplate) {
+    for (let i = 0; i < argTemplate.length; i++) {
+      const item = argTemplate[i];
+      if ((item === '-m' || item === '--model') && argTemplate[i + 1] === '{model}' && (!model || model === 'main')) {
+        i++;
+        continue;
+      }
       if (item === '{prompt}' || item === '{user}') injectedPromptInArgs = true;
       let val = item;
       for (const [k, v] of Object.entries(replacements)) {
@@ -351,11 +372,36 @@ async function cliExchange({
     }
     if (!injectedPromptInArgs && promptMode === 'arg') finalArgs.push(combinedPrompt);
 
-    const run = resolveCommand(bin, finalArgs);
+    const resolvedBin = resolveCliExecutable(bin);
+    let openCodeConfigEnv = {};
+    if (mcpEnv && mcpSupport !== 'none' && /opencode/i.test(path.basename(resolvedBin))) {
+      const serverScript = path.join(__dirname, 'workbench-mcp-server.cjs').replace(/app\.asar(?=[\\/]|$)/, 'app.asar.unpacked');
+      const mcpCommand = nodePath || process.execPath;
+      const runAsNode = /electron(\.exe)?$|pi[\s-]*workbench/i.test(path.basename(mcpCommand));
+      let baseOc = {};
+      try { if (process.env.OPENCODE_CONFIG_CONTENT) baseOc = JSON.parse(process.env.OPENCODE_CONFIG_CONTENT); } catch {}
+      openCodeConfigEnv = {
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          ...baseOc,
+          mcp: {
+            ...(baseOc.mcp || {}),
+            'pi-workbench': {
+              type: 'local',
+              command: [mcpCommand, serverScript],
+              enabled: true,
+              environment: { ...mcpEnv, ...(runAsNode ? { ELECTRON_RUN_AS_NODE: '1' } : {}) }
+            }
+          }
+        })
+      };
+    }
+
+    const run = resolveCommand(resolvedBin, finalArgs);
     const childEnv = {
       ...process.env,
       ...extraEnv,
       ...(mcpEnv || {}),
+      ...openCodeConfigEnv,
       ...(mcpConfigFile ? { PI_WORKBENCH_MCP_CONFIG: mcpConfigFile } : {}),
       ...(model ? { PI_EXTERNAL_AGENT_MODEL: String(model) } : {})
     };
@@ -476,7 +522,7 @@ async function exchange(cfg, { system = '', user = '', sessionKey, thinking, max
   const fullPrompt = system ? `${system}\n\n${user}` : String(user || '');
   if (transport === 'mcp-relay') {
     if (typeof relayDispatch !== 'function') throw new Error('MCP 在线接力调度器未就绪');
-    const out = await relayDispatch(cfg.profileId || cfg.id, { system, user, mode, timeoutMs, signal });
+    const out = await relayDispatch(cfg.profileId || cfg.id, { system, user, model: cfg.model || '', mode, timeoutMs, signal });
     if (out?.text && onDelta) onDelta(out.text);
     return out;
   }
@@ -811,6 +857,79 @@ async function parseAgentImportText({ rawText, callerCfg, callModelImpl }) {
   };
 }
 
+function splitCommandLine(text) {
+  const out = [];
+  let cur = '', quote = '';
+  for (const ch of String(text || '').trim()) {
+    if (quote) {
+      if (ch === quote) quote = '';
+      else cur += ch;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+    } else if (/\s/.test(ch)) {
+      if (cur) { out.push(cur); cur = ''; }
+    } else {
+      cur += ch;
+    }
+  }
+  if (cur) out.push(cur);
+  return out;
+}
+
+// 从命令输出或 Agent 回复里提取模型 ID：优先 JSON 数组 / {models:[]}，否则按行取首个 token。
+function parseModelIds(text) {
+  const raw = String(text || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim();
+  const uniq = list => [...new Set(list.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 200);
+  const fromJson = value => {
+    const arr = Array.isArray(value) ? value : (Array.isArray(value?.models) ? value.models : (Array.isArray(value?.data) ? value.data : null));
+    return arr ? uniq(arr.map(x => typeof x === 'string' ? x : (x && (x.id || x.name || x.model)))) : null;
+  };
+  try { const found = fromJson(JSON.parse(raw)); if (found) return found; } catch {}
+  const block = raw.match(/\[[\s\S]*\]/);
+  if (block) { try { const found = fromJson(JSON.parse(block[0])); if (found && found.length) return found; } catch {} }
+  const ids = [];
+  for (const line of raw.split(/\r?\n/)) {
+    const token = line.trim();
+    // Only accept an entire ID line; prose, tables and diagnostics are not models.
+    if (/^[A-Za-z0-9][\w.:/@+-]{0,99}$/.test(token) && /[/.:-]/.test(token)) ids.push(token);
+  }
+  return uniq(ids);
+}
+
+// 自动获取外部 Agent 的真实模型列表：CLI 走“模型列表命令”（如 opencode models），MCP 接力让源 Agent 自己枚举；其余返回 null。
+async function listAgentModels(cfg, { relayDispatch, timeoutMs = 20000, signal } = {}) {
+  const transport = cfg?.agentTransport || cfg?.provider;
+  if (transport === 'mcp-relay') {
+    if (typeof relayDispatch !== 'function') return null;
+    const out = await relayDispatch(cfg.profileId || cfg.id, {
+      system: '',
+      user: '请列出你当前真实可用于对话的全部模型 ID（以你自己的模型选择列表或配置为准，不要编造）。只回复一个 JSON 字符串数组，例如 ["model-a","model-b"]，不要任何其他文字。',
+      mode: 'chat',
+      timeoutMs,
+      signal
+    });
+    return parseModelIds(out?.text);
+  }
+  if (transport === 'external-cli' && String(cfg.modelsCommand || '').trim()) {
+    const parts = splitCommandLine(cfg.modelsCommand);
+    if (!parts.length) return null;
+    const run = resolveCommand(resolveCliExecutable(parts[0]), parts.slice(1));
+    const env = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;
+    const text = await new Promise((resolve, reject) => {
+      const child = spawn(run.file, run.args, { env, cwd: cfg.cwd || process.cwd(), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, windowsVerbatimArguments: run.windowsVerbatimArguments });
+      let out = '', err = '';
+      const timer = setTimeout(() => { try { child.kill(); } catch {} reject(new Error('模型列表命令执行超时')); }, Math.max(3000, timeoutMs));
+      child.stdout.on('data', c => { out += c; });
+      child.stderr.on('data', c => { err = (err + c).slice(-1000); });
+      child.once('error', e => { clearTimeout(timer); reject(new Error('无法执行模型列表命令：' + e.message)); });
+      child.once('close', code => { clearTimeout(timer); if (code === 0 || out.trim()) resolve(out); else reject(new Error(err.trim() || '模型列表命令退出码 ' + code)); });
+    });
+    return parseModelIds(text);
+  }
+  return null;
+}
+
 module.exports = {
   normalizeWsUrl,
   openClawExchange,
@@ -819,5 +938,8 @@ module.exports = {
   probeCapabilities,
   probeApiToolCalling,
   parseAgentImportText,
-  parseArgsList
+  parseArgsList,
+  splitCommandLine,
+  parseModelIds,
+  listAgentModels
 };

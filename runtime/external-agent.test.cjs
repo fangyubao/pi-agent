@@ -212,3 +212,17 @@ test('OpenAI 兼容 API 工具调用探测：返回 tool_calls 判支持工作�
   );
   assert.equal(resTextOnly.ok, false);
 });
+
+
+test('模型目录解析：保留完整 ID，拒绝把解释文字当作模型', () => {
+  assert.deepEqual(ext.parseModelIds('{"models":["model-a","model-a",{"id":"vendor/model-b"}]}'), ['model-a','vendor/model-b']);
+  assert.deepEqual(ext.parseModelIds('Cannot access model list\nPlease configure credentials'), []);
+  assert.deepEqual(ext.parseModelIds('opencode/beam-free\nopencode/big-pickle'), ['opencode/beam-free','opencode/big-pickle']);
+});
+test('接力模型目录与选定模型传递', async () => {
+  const cfg = {kind:'external-agent',agentTransport:'mcp-relay',profileId:'relay',model:'model-b'};
+  assert.deepEqual(await ext.listAgentModels(cfg,{relayDispatch:async()=>({text:'["model-a","model-b"]'})}), ['model-a','model-b']);
+  let request;
+  await ext.exchange(cfg,{user:'hello',relayDispatch:async(id,req)=>{assert.equal(id,'relay');request=req;return {text:'ok'};}});
+  assert.equal(request.model,'model-b');
+});

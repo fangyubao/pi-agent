@@ -409,6 +409,16 @@ test('Agent Connect MCP 自包含目录：源 Agent 仅凭读文件+MCP自主连
       arguments: { name: 'WorkBuddy接力', agentTransport: 'mcp-relay', models: ['relay-main'] }
     });
     const relayProfileId = JSON.parse(relayReg.result.content[0].text).profileId;
+    const reportedModels=['wb-model-a','wb-model-b','wb-model-c','wb-model-d','wb-model-e'];
+    const update=await callRpc('tools/call',{name:'pi_workbench_update_models',arguments:{profileId:relayProfileId,models:reportedModels}});
+    expect(JSON.parse(update.result.content[0].text).count).toBe(5);
+    await expect(page.locator('[data-model-slot="0"] option')).toHaveText(['不启用',...reportedModels]);
+    await page.locator('[data-model-slot="0"]').selectOption('wb-model-e');
+    await page.locator('#provider-form').evaluate(f=>f.requestSubmit());
+    await expect(page.locator('#provider-status')).toContainText('配置已保存');
+    const savedProfile=await page.evaluate(async id=>(await window.piDesktop.provider.getConfig()).profiles.find(p=>p.id===id),relayProfileId);
+    expect(savedProfile.discoveredModels).toEqual(reportedModels);
+    expect(savedProfile.model).toBe('wb-model-e');
     await expect(page.locator('#provider-pairing-status')).toContainText('已连入：WorkBuddy接力', { timeout: 15000 });
     await expect(page.locator('#provider-pairing-status')).toContainText('工作台：可用', { timeout: 10000 });
     await expect(page.locator('[data-cap-key="workbench"]')).toHaveClass(/ok/);
@@ -426,6 +436,7 @@ test('Agent Connect MCP 自包含目录：源 Agent 仅凭读文件+MCP自主连
         if (!res) break;
         const data = JSON.parse(res.result.content[0].text);
         if (!data.idle && data.task) {
+          expect(data.task.model).toBe('wb-model-e');
           const wbRes = await callRpc('tools/call', { name: 'workbench_action', arguments: { command: 'readDesignWorkflow', payload: {} } });
           await callRpc('tools/call', {
             name: 'pi_workbench_submit_result',
