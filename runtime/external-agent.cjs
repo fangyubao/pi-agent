@@ -903,7 +903,7 @@ async function listAgentModels(cfg, { relayDispatch, timeoutMs = 20000, signal }
     if (typeof relayDispatch !== 'function') return null;
     const out = await relayDispatch(cfg.profileId || cfg.id, {
       system: '',
-      user: '请列出你当前真实可用于对话的全部模型 ID（以你自己的模型选择列表或配置为准，不要编造）。只回复一个 JSON 字符串数组，例如 ["model-a","model-b"]，不要任何其他文字。',
+      user: '请列出你当前真实可用于对话的全部模型 ID（以你自己的模型选择列表、配置或当前会话正在使用的模型为准，不要编造）。如果无法枚举完整列表，至少把你当前正在使用的真实模型 ID 放进数组里。只回复一个 JSON 字符串数组，例如 ["model-a","model-b"]，不要任何其他文字。',
       mode: 'chat',
       timeoutMs,
       signal
