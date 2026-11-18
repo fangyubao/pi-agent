@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 256 256">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c96442"/>
+      <stop offset="100%" stop-color="#9e3f1f"/>
+    </linearGradient>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="135%">
+      <feDropShadow dx="0" dy="6" stdDeviation="6" flood-color="#3b1508" flood-opacity="0.28"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="232" height="232" rx="54" fill="url(#bg)"/>
+  <rect x="18" y="18" width="220" height="220" rx="48" fill="none" stroke="#fbf9f6" stroke-opacity="0.22" stroke-width="2.5"/>
+  <!-- Subtle workbench corner ticks -->
+  <path d="M48 64V48h16M208 64V48h-16M48 192v16h16M208 192v16h-16" fill="none" stroke="#fbf9f6" stroke-opacity="0.34" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <!-- Serif Pi mark matching .brand-mark -->
+  <text x="128" y="176" text-anchor="middle" font-family="Georgia, 'Times New Roman', serif" font-size="172" font-weight="600" fill="#fbf9f6" filter="url(#shadow)">π</text>
+</svg>

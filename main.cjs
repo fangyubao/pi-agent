@@ -742,6 +742,7 @@ function createWindow() {
     minHeight: 680,
     backgroundColor: '#fbf9f6',
     title: 'Pi Workbench',
+    icon: path.join(__dirname, 'build', process.platform === 'win32' ? 'icon.ico' : 'icon.png'),
     frame: false,
     show: false,
     webPreferences: {

@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "test:runtime": "node --test runtime/*.test.cjs",
     "test:all": "npm run test:agent && npm run test:recovery && npm run test:runtime && npm run test:e2e",
-    "test:deepeval": "python evals/deepeval_agent_eval.py",
+    "test:deepeval": ".\\.venv-eval\\Scripts\\python.exe evals\\deepeval_agent_eval.py",
     "setup:runtime": "npm ci --prefix packaging/pi-runtime --omit=dev --ignore-scripts",
     "prepare:runtime": "node scripts/prepare-runtime.cjs",
     "dist": "npm run prepare:runtime && electron-builder --win nsis"
@@ -31,7 +31,10 @@
       }
     ],
     "nsis": {
-      "include": "build/installer.nsh"
+      "include": "build/installer.nsh",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
     },
     "electronDist": "node_modules/electron/dist",
     "afterPack": "scripts/check-runtime-package.cjs",
@@ -42,6 +45,8 @@
       "main.cjs",
       "bootstrap.cjs",
       "preload.cjs",
+      "build/icon.ico",
+      "build/icon.png",
       "runtime",
       "node_modules/markdown-it/dist/browser/markdown-it.umd.min.js",
       "!runtime/*.test.cjs",
@@ -84,6 +89,7 @@
     ],
     "win": {
       "target": "nsis",
+      "icon": "build/icon.ico",
       "artifactName": "Pi-Workbench-${version}-Setup.${ext}",
       "signAndEditExecutable": false
     }
