@@ -57,28 +57,28 @@ window.PiWorkbenchModules.workflow = {
       }
       if (pick.by === 'node') {
         return {
-          subText: dom.tendency + ' ｜ 依据：手选锁定',
-          fullReason: dom.basisText + '；当前已由用户手动锁定为模型 ' + modelName
+          subText: dom.tendency + ' · 手选',
+          fullReason: dom.basisText + '；当前已由用户手动指定模型 ' + modelName
         };
       }
       if (pick.by === 'agent') {
         return {
-          subText: dom.tendency + ' ｜ 依据：随子智能体',
+          subText: dom.tendency + ' · 随子智能体',
           fullReason: dom.basisText + '；当前跟随子智能体「' + (n.agent || '') + '」统一使用模型 ' + modelName
         };
       }
       if (pick.by === 'tier') {
         const subText = (n.model && n.model.cardBasis)
           ? n.model.cardBasis
-          : (dom.tendency + ' ｜ 依据：' + dom.labels.join('+') + '榜 #1');
+          : (dom.tendency + ' · ' + dom.labels[0] + '榜#1');
         const fullReason = (n.model && n.model.reason)
           ? n.model.reason
           : (dom.basisText + '；按领域排行榜自动匹配最优模型 ' + modelName);
         return { subText, fullReason };
       }
       return {
-        subText: dom.tendency + ' ｜ 依据：当前主模型',
-        fullReason: dom.basisText + '；当前使用主模型 ' + modelName + ' 执行（添加更多模型后将按领域排行榜自动优选专长模型）'
+        subText: dom.tendency,
+        fullReason: dom.basisText
       };
     }
 
@@ -95,7 +95,7 @@ window.PiWorkbenchModules.workflow = {
         '<header><span class="wf-id">' + esc(n.id) + '</span><strong title="' + esc(n.title) + '">' + esc(n.title) + '</strong><button type="button" class="wf-edit" data-act="edit" aria-label="修改 ' + esc(n.title) + '" title="修改">✎</button></header>' +
         '<div class="wf-role">' + (n.agent ? '<span class="wf-agent" style="--agent:' + agentColor(n.agent) + '" title="所属子智能体">' + esc(n.agent) + '</span>' : '') + esc(n.role) + '</div>' +
         '<p class="wf-brief" title="双击查看完整提示词与选型依据">' + esc(n.brief) + '</p>' +
-        '<footer><button type="button" class="wf-model" data-act="model" title="' + esc(domInfo.fullReason + '（点击切换模型）') + '">' + esc(modelName) + '<small>' + esc(domInfo.subText) + (n.effort && n.effort !== 'off' ? ' · 思考' + esc(EFFORT_LABEL[n.effort]) : '') + '</small></button>' + (tags ? '<div class="wf-tags">' + tags + '</div>' : '') + '<div class="wf-runrow"><button type="button" class="wf-run" data-act="run"' + (running ? ' disabled' : '') + ' title="单独运行这个节点（依赖的上游节点需要先有结果）">▶ 运行</button>' + (runLabel ? '<button type="button" class="wf-runstate ' + esc(run.status) + '" data-act="result" title="查看结果">' + runLabel + '</button>' : '') + '</div></footer>' +
+        '<footer><button type="button" class="wf-model" data-act="model" title="' + esc(domInfo.fullReason + '（点击切换模型）') + '"><span class="wf-model-name">' + esc(modelName) + '</span><small>' + esc(domInfo.subText) + (n.effort && n.effort !== 'off' ? ' · 思考' + esc(EFFORT_LABEL[n.effort]) : '') + '</small></button>' + (tags ? '<div class="wf-tags">' + tags + '</div>' : '') + '<div class="wf-runrow"><button type="button" class="wf-run" data-act="run"' + (running ? ' disabled' : '') + ' title="单独运行这个节点（依赖的上游节点需要先有结果）">▶ 运行</button>' + (runLabel ? '<button type="button" class="wf-runstate ' + esc(run.status) + '" data-act="result" title="查看结果">' + runLabel + '</button>' : '') + '</div></footer>' +
         (stale.has(n.id) ? '<span class="wf-stale" title="上游已修改，结果已过期">需更新</span>' : '') + '</article>';
     }
 

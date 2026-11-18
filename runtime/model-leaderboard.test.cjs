@@ -73,8 +73,9 @@ test('任务领域自动识别与 5 档智能推荐：按领域关键词归类�
   assert.equal(assignedByLeaderboard[0].model.category, 'coding');
   assert.equal(assignedByLeaderboard[0].model.model, 'qwen-2.5-coder-32b');
   assert.match(assignedByLeaderboard[0].model.cardBasis, /倾向：编程/);
-  assert.match(assignedByLeaderboard[0].model.cardBasis, /依据：.*榜 #1/);
+  assert.match(assignedByLeaderboard[0].model.cardBasis, /榜#1/);
   assert.ok(!assignedByLeaderboard[0].model.cardBasis.includes('难度'));
+  assert.ok(!assignedByLeaderboard[0].model.cardBasis.includes('当前主模型'));
   assert.match(assignedByLeaderboard[0].model.reason, /排名第 1/);
   assert.equal(assignedByLeaderboard[1].category, 'math');
   assert.equal(assignedByLeaderboard[1].model.category, 'math');

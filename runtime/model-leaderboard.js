@@ -392,8 +392,8 @@
         const domainTitle = dom.labels.join('+');
         const primaryScore = scoreIn(best, catId);
         const cardBasis = best.entry
-          ? `${dom.tendency} ｜ 依据：${domainTitle}榜 #1（${primaryScore}分）`
-          : `${dom.tendency} ｜ 依据：档位${(best.tier ?? 0) + 1}映射`;
+          ? `${dom.tendency} · ${dom.labels[0]}榜#1`
+          : `${dom.tendency} · 档位${(best.tier ?? 0) + 1}`;
         const reason = best.entry
           ? `${dom.basisText}；在当前可用模型中，${best.model} 于「${domainTitle}」领域榜排名第 1（${primaryScore}分），因此自动选定`
           : `${dom.basisText}；当前模型未收录于公开榜单，按档位 ${(best.tier ?? 0) + 1} 映射选择 ${best.model}`;
