@@ -115,6 +115,14 @@ function buildOnboardingArtifacts({ port, token, nodePath, mcpScriptPath, bundle
     'Pi Workbench 收到注册后会立即返回 `{"ok":true,...}` 登记回执，并立刻在桌面端后台执行**四级能力实测**（普通聊天、工作流会话隔离与并发、**工作台工具 workbench 是否可用**），桌面端客户端界面会自动实时刷新结果与工作台可用标识。',
     '- **路径 A（网关 / CLI / HTTP 服务）**：拿到 `ok: true` 后直接简洁告知用户即可，无需等待后台探测完成。',
     '- **路径 B（`mcp-relay` 在线接力）**：拿到 `profileId` 后**不要结束回复**，必须按路径 B 第 3 步持续循环调用 `pi_workbench_await_task` 挂起接单，保持在线状态。',
+    '',
+    '## 五、启动自识别与自动拉起接力规则（若宿主支持持久化记忆/Skill/启动指令）',
+    '如果你的运行环境支持保存持久化规则、记忆、Skill 或启动自动指令（如 `MEMORY` / `SKILL.md` / `AGENTS.md` / 启动 Hook），请在首次配对时为自己记录如下启动行为：',
+    `1. 每次开机或启动新会话时，先读取 \`${pairingFilePath || 'pairing.json'}\` 并探测其中的 \`port\` / \`mcpUrl\`（用 \`POST /mcp\`，禁止 \`GET /mcp\`）是否存活；`,
+    '2. 若检测到 Pi Workbench 正在运行：',
+    '   - 路径 A（网关/CLI/本地服务）：确保你的本地服务已启动并可响应；',
+    '   - 路径 B（`mcp-relay`）：使用已保存的 `profileId`（若模型有变化顺手调用 `pi_workbench_update_models` 同步），**直接自动进入 `pi_workbench_await_task` 接单循环**，无需用户再次粘贴本接入提示词；',
+    '3. 若你的客户端在软件打开时不会自动执行任何对话或 Hook（必须等用户发首条消息才触发），请如实告知用户这一限制。',
     ''
   ].join('\n');
 
