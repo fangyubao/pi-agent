@@ -454,6 +454,16 @@ test('Agent Connect MCP 自包含目录：源 Agent 仅凭读文件+MCP自主连
     workerActive = false;
     await workerLoop;
     await expect(page.locator('.messages')).toContainText('RELAY_WB_OK:');
+
+    // 验证设置页勾选批量删除外部 Agent
+    await page.evaluate(() => { window.confirm = () => true; });
+    await page.locator('[data-route="settings"]').click();
+    await page.locator('#settings-tab-llm').click();
+    await page.locator('#provider-select-ext').click();
+    await expect(page.locator('#provider-delete-selected')).toContainText('删除勾选（1）');
+    await page.locator('#provider-delete-selected').click();
+    await expect(page.locator('.provider-item')).toHaveCount(1);
+    await expect(page.locator('.provider-item-name')).toContainText('WorkBuddy接力');
   } finally {
     mcpChild?.kill();
     await app.close().catch(() => {});

@@ -44,6 +44,7 @@ window.PiProviderSettings = (() => {
     let displayed = null;
     let pairingInfo = null;
     let pairingBusy = false;
+    const checkedIds = new Set();
 
     const unsubUpdate = window.PiProviderManager.onUpdated(event => {
       if (!root.isConnected) { unsubUpdate(); return; }
@@ -373,17 +374,31 @@ window.PiProviderSettings = (() => {
 
       const rows = [...profiles, ...(draft ? [draft] : [])];
       if (!rows.some(x => x.id === p.id)) rows.push(p);
+      for (const id of [...checkedIds]) if (!profiles.some(x => x.id === id)) checkedIds.delete(id);
+      const showChecks = profiles.length > 1;
       const items = rows.map(x => {
         const open = x.id === p.id;
+        const isDraftRow = Boolean(draft && x.id === draft.id);
         const extRow = capsApi().isExternalAgent(x);
         const caps = capsApi().normalizeCapabilities(x.capabilities, x);
         const sub = extRow
           ? (caps.mode === 'unprobed' ? '等待接入 / 未探测' : (x.agentTransport === 'mcp-relay' ? (x.relayOnline ? 'MCP 在线接力' : 'MCP 接力(待机)') : ([!caps.workbench && '无工作台', !caps.workflow && '无工作流'].filter(Boolean).join(' · ') || '全模式可用')))
           : (x.models?.length ? x.models.length + ' 个模型' : '未选模型');
-        return '<details class="provider-item" data-profile="' + esc(x.id) + '"' + (open ? ' open' : '') + '><summary><span class="provider-item-name">' + esc(draft && x.id === draft.id ? (extRow ? '导入外部 Agent（自主配对）' : '新 API（未保存）') : x.name) + '</span>' + (extRow ? '<span class="provider-item-kind">外部 Agent</span>' : '') + (x.id === config.profileId ? '<span class="provider-item-badge">当前</span>' : '') + '<span class="provider-item-sub">' + esc(sub) + '</span></summary>' + (open ? formHtml : '') + '</details>';
+        const checkHtml = showChecks && !isDraftRow
+          ? '<input type="checkbox" class="provider-item-check" data-check-profile="' + esc(x.id) + '" aria-label="勾选 ' + esc(x.name) + '"' + (checkedIds.has(x.id) ? ' checked' : '') + '>'
+          : '';
+        return '<details class="provider-item" data-profile="' + esc(x.id) + '"' + (open ? ' open' : '') + '><summary>' + checkHtml + '<span class="provider-item-name">' + esc(isDraftRow ? (extRow ? '导入外部 Agent（自主配对）' : '新 API（未保存）') : x.name) + '</span>' + (extRow ? '<span class="provider-item-kind">外部 Agent</span>' : '') + (x.id === config.profileId ? '<span class="provider-item-badge">当前</span>' : '') + '<span class="provider-item-sub">' + esc(sub) + '</span></summary>' + (open ? formHtml : '') + '</details>';
       }).join('');
 
-      root.innerHTML += '<div class="provider-list">' + items + '</div><div class="provider-add-row"><button type="button" class="button provider-add-bottom" id="provider-add">＋ 新增 API</button><button type="button" class="button provider-add-bottom" id="provider-import-agent">＋ 导入外部 Agent</button></div>' + tiersHtml();
+      const extCount = profiles.filter(x => capsApi().isExternalAgent(x)).length;
+      const batchBar = showChecks
+        ? '<div class="provider-batch-bar" id="provider-batch-bar"><span class="settings-note" id="provider-batch-count">已勾选 ' + checkedIds.size + ' / ' + profiles.length + ' 项</span><div class="provider-batch-actions">' +
+          (extCount > 0 ? '<button type="button" class="button" id="provider-select-ext">全选外部 Agent</button>' : '') +
+          '<button type="button" class="button" id="provider-select-clear"' + (checkedIds.size ? '' : ' disabled') + '>取消勾选</button>' +
+          '<button type="button" class="button danger" id="provider-delete-selected"' + (checkedIds.size ? '' : ' disabled') + '>删除勾选（' + checkedIds.size + '）</button></div></div>'
+        : '';
+
+      root.innerHTML += batchBar + '<div class="provider-list">' + items + '</div><div class="provider-add-row"><button type="button" class="button provider-add-bottom" id="provider-add">＋ 新增 API</button><button type="button" class="button provider-add-bottom" id="provider-import-agent">＋ 导入外部 Agent</button></div>' + tiersHtml();
 
       if (!isExt) {
         root.querySelector('#provider-kind').value = p.provider || 'openai-compatible';
@@ -505,7 +520,62 @@ window.PiProviderSettings = (() => {
         });
       }
 
+      const syncBatchBar = () => {
+        const countEl = root.querySelector('#provider-batch-count');
+        const clearBtn = root.querySelector('#provider-select-clear');
+        const delSelBtn = root.querySelector('#provider-delete-selected');
+        if (countEl) countEl.textContent = '已勾选 ' + checkedIds.size + ' / ' + profiles.length + ' 项';
+        if (clearBtn) clearBtn.disabled = checkedIds.size === 0;
+        if (delSelBtn) {
+          delSelBtn.disabled = checkedIds.size === 0;
+          delSelBtn.textContent = '删除勾选（' + checkedIds.size + '）';
+        }
+      };
+
+      root.querySelectorAll('.provider-item-check').forEach(cb => {
+        cb.addEventListener('click', e => e.stopPropagation());
+        cb.addEventListener('change', e => {
+          e.stopPropagation();
+          const id = cb.dataset.checkProfile;
+          if (cb.checked) checkedIds.add(id); else checkedIds.delete(id);
+          syncBatchBar();
+        });
+      });
+
+      const selExtBtn = root.querySelector('#provider-select-ext');
+      if (selExtBtn) selExtBtn.onclick = () => {
+        const extProfiles = profiles.filter(x => capsApi().isExternalAgent(x));
+        const maxSelect = extProfiles.length >= profiles.length ? profiles.length - 1 : extProfiles.length;
+        checkedIds.clear();
+        extProfiles.slice(0, maxSelect).forEach(x => checkedIds.add(x.id));
+        root.querySelectorAll('.provider-item-check').forEach(cb => { cb.checked = checkedIds.has(cb.dataset.checkProfile); });
+        syncBatchBar();
+      };
+
+      const selClearBtn = root.querySelector('#provider-select-clear');
+      if (selClearBtn) selClearBtn.onclick = () => {
+        checkedIds.clear();
+        root.querySelectorAll('.provider-item-check').forEach(cb => { cb.checked = false; });
+        syncBatchBar();
+      };
+
+      const delSelBtn = root.querySelector('#provider-delete-selected');
+      if (delSelBtn) delSelBtn.onclick = async () => {
+        const ids = [...checkedIds].filter(id => profiles.some(x => x.id === id));
+        if (!ids.length) return;
+        if (ids.length >= profiles.length) { notify('至少保留 1 个配置，请先取消勾选其中 1 项'); return; }
+        if (!confirm('确定删除勾选的 ' + ids.length + ' 项配置吗？不会删除历史对话。')) return;
+        const result = await window.PiProviderManager.deleteMany(ids);
+        if (!result?.ok) { notify(result?.error || '批量删除失败'); return; }
+        checkedIds.clear();
+        config = result.config; profiles = config.profiles || [];
+        if (!profiles.some(x => x.id === selectedId)) selectedId = config.profileId || profiles[0]?.id;
+        draft = null; status = '已删除 ' + (result.deletedCount || ids.length) + ' 项配置';
+        onChange(config); draw(); notify('已批量删除 ' + (result.deletedCount || ids.length) + ' 项配置');
+      };
+
       root.querySelectorAll('.provider-item').forEach(d => d.querySelector('summary').addEventListener('click', e => {
+        if (e.target && e.target.closest && e.target.closest('.provider-item-check')) return;
         if (d.dataset.profile === p.id) return;
         e.preventDefault(); selectedId = d.dataset.profile; draft = null; status = ''; draw();
       }));

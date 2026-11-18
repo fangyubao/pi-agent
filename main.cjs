@@ -1136,6 +1136,19 @@ if(primaryInstance)app.whenReady().then(() => {
     await storeProviderConfig(next);
     return { ok: true, config: publicConfig(next) };
   }));
+  ipcMain.handle('provider:delete-many', async (event, input = {}) => serializeProviderWrite(async () => {
+    checkShell(event);
+    const ids = new Set((Array.isArray(input.profileIds) ? input.profileIds : []).map(x => String(x || '').trim()).filter(Boolean));
+    if (!ids.size) return { ok: false, error: '请先勾选要删除的配置' };
+    const raw = await readProviderConfig();
+    const all = providerProfiles(raw);
+    const profiles = all.filter(x => !ids.has(x.id));
+    if (!profiles.length) return { ok: false, error: '至少保留一个 API 或外部 Agent 配置' };
+    const nextActive = profiles.some(x => x.id === raw.activeProfileId) ? raw.activeProfileId : profiles[0].id;
+    const next = { schema: 2, activeProfileId: nextActive, profiles, modelTiers: modelTiers.prune(raw.modelTiers, vendorList({ profiles })).tiers };
+    await storeProviderConfig(next);
+    return { ok: true, deletedCount: all.length - profiles.length, config: publicConfig(next) };
+  }));
   ipcMain.handle('provider:list-models', async (_event, input = {}) => {
     try {
       const cfg = await effectiveProvider(input);

@@ -57,6 +57,7 @@ contextBridge.exposeInMainWorld('piDesktop', Object.freeze({
     saveConfig: config => ipcRenderer.invoke('provider:save-config', config),
     activate: profileId => ipcRenderer.invoke('provider:activate', { profileId }),
     delete: profileId => ipcRenderer.invoke('provider:delete', { profileId }),
+    deleteMany: profileIds => ipcRenderer.invoke('provider:delete-many', { profileIds }),
     listModels: config => ipcRenderer.invoke('provider:list-models', config),
     test: config => ipcRenderer.invoke('provider:test', config),
     probeCapabilities: config => ipcRenderer.invoke('provider:probe-capabilities', config),
