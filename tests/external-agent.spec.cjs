@@ -417,8 +417,12 @@ test('Agent Connect MCP 自包含目录：源 Agent 仅凭读文件+MCP自主连
     await page.locator('#provider-form').evaluate(f=>f.requestSubmit());
     await expect(page.locator('#provider-status')).toContainText('配置已保存');
     const savedProfile=await page.evaluate(async id=>(await window.piDesktop.provider.getConfig()).profiles.find(p=>p.id===id),relayProfileId);
+    expect(savedProfile.ephemeral).toBe(true);
     expect(savedProfile.discoveredModels).toEqual(reportedModels);
     expect(savedProfile.model).toBe('wb-model-e');
+    const diskConfig = JSON.parse(fs.readFileSync(path.join(profileDir, 'provider-config.json'), 'utf8'));
+    expect(diskConfig.profiles.some(p => p.id === relayProfileId)).toBe(false);
+    expect(diskConfig.profiles.some(p => p.name === '自主OpenClaw')).toBe(true);
     await expect(page.locator('#provider-pairing-status')).toContainText('已连入：WorkBuddy接力', { timeout: 15000 });
     await expect(page.locator('#provider-pairing-status')).toContainText('工作台：可用', { timeout: 10000 });
     await expect(page.locator('[data-cap-key="workbench"]')).toHaveClass(/ok/);

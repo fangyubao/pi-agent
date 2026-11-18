@@ -69,10 +69,10 @@ window.PiProviderSettings = (() => {
             ...(pairingInfo || {}),
             state: { status: 'connected', profileId: event.addedProfileId, name: event.name, capabilities: event.capabilities }
           };
-          status = '✅ 源 Agent「' + (event.name || '') + '」已自主连入 · ' + wbLabel;
+          status = (event.ephemeral ? '⚡ 源 Agent「' + (event.name || '') + '」已作为临时接力连入（仅本次会话有效，重启不保留）· ' : '✅ 源 Agent「' + (event.name || '') + '」已自主连入 · ') + wbLabel;
           onChange(config);
           draw();
-          notify('已连入：' + (event.name || '外部 Agent') + '（' + wbLabel + '）');
+          notify((event.ephemeral ? '已临时连入：' : '已连入：') + (event.name || '外部 Agent') + '（' + wbLabel + '）');
         }
       } else if (event.modelsProfileId) {
         if (selectedId === event.modelsProfileId) {
@@ -376,19 +376,29 @@ window.PiProviderSettings = (() => {
       if (!rows.some(x => x.id === p.id)) rows.push(p);
       for (const id of [...checkedIds]) if (!profiles.some(x => x.id === id)) checkedIds.delete(id);
       const showChecks = profiles.length > 1;
-      const items = rows.map(x => {
+      const renderRow = x => {
         const open = x.id === p.id;
         const isDraftRow = Boolean(draft && x.id === draft.id);
         const extRow = capsApi().isExternalAgent(x);
+        const ephRow = Boolean(x.ephemeral);
         const caps = capsApi().normalizeCapabilities(x.capabilities, x);
         const sub = extRow
-          ? (caps.mode === 'unprobed' ? '等待接入 / 未探测' : (x.agentTransport === 'mcp-relay' ? (x.relayOnline ? 'MCP 在线接力' : 'MCP 接力(待机)') : ([!caps.workbench && '无工作台', !caps.workflow && '无工作流'].filter(Boolean).join(' · ') || '全模式可用')))
+          ? (caps.mode === 'unprobed' ? '等待接入 / 未探测' : (x.agentTransport === 'mcp-relay' ? (x.relayOnline ? 'MCP 在线接力（临时）' : 'MCP 接力待机（临时）') : ([!caps.workbench && '无工作台', !caps.workflow && '无工作流'].filter(Boolean).join(' · ') || '全模式可用')))
           : (x.models?.length ? x.models.length + ' 个模型' : '未选模型');
         const checkHtml = showChecks && !isDraftRow
           ? '<input type="checkbox" class="provider-item-check" data-check-profile="' + esc(x.id) + '" aria-label="勾选 ' + esc(x.name) + '"' + (checkedIds.has(x.id) ? ' checked' : '') + '>'
           : '';
-        return '<details class="provider-item" data-profile="' + esc(x.id) + '"' + (open ? ' open' : '') + '><summary>' + checkHtml + '<span class="provider-item-name">' + esc(isDraftRow ? (extRow ? '导入外部 Agent（自主配对）' : '新 API（未保存）') : x.name) + '</span>' + (extRow ? '<span class="provider-item-kind">外部 Agent</span>' : '') + (x.id === config.profileId ? '<span class="provider-item-badge">当前</span>' : '') + '<span class="provider-item-sub">' + esc(sub) + '</span></summary>' + (open ? formHtml : '') + '</details>';
-      }).join('');
+        const kindBadge = extRow
+          ? (ephRow ? '<span class="provider-item-kind ephemeral">临时 · 不保存</span>' : '<span class="provider-item-kind">外部 Agent</span>')
+          : '';
+        return '<details class="provider-item" data-profile="' + esc(x.id) + '"' + (open ? ' open' : '') + '><summary>' + checkHtml + '<span class="provider-item-name">' + esc(isDraftRow ? (extRow ? '导入外部 Agent（自主配对）' : '新 API（未保存）') : x.name) + '</span>' + kindBadge + (x.id === config.profileId ? '<span class="provider-item-badge">当前</span>' : '') + '<span class="provider-item-sub">' + esc(sub) + '</span></summary>' + (open ? formHtml : '') + '</details>';
+      };
+      const persistentRows = rows.filter(x => !x.ephemeral);
+      const ephemeralRows = rows.filter(x => x.ephemeral);
+      const items = persistentRows.map(renderRow).join('');
+      const ephemeralSection = ephemeralRows.length
+        ? '<div class="provider-ephemeral-section"><div class="provider-ephemeral-head"><strong>临时在线接力</strong><span class="settings-note">仅本次 Pi Workbench 运行期有效（需保持源窗口处于接单轮询状态），重启自动清除，不写入长久配置</span></div><div class="provider-list">' + ephemeralRows.map(renderRow).join('') + '</div></div>'
+        : '';
 
       const extCount = profiles.filter(x => capsApi().isExternalAgent(x)).length;
       const batchBar = showChecks
@@ -398,7 +408,7 @@ window.PiProviderSettings = (() => {
           '<button type="button" class="button danger" id="provider-delete-selected"' + (checkedIds.size ? '' : ' disabled') + '>删除勾选（' + checkedIds.size + '）</button></div></div>'
         : '';
 
-      root.innerHTML += batchBar + '<div class="provider-list">' + items + '</div><div class="provider-add-row"><button type="button" class="button provider-add-bottom" id="provider-add">＋ 新增 API</button><button type="button" class="button provider-add-bottom" id="provider-import-agent">＋ 导入外部 Agent</button></div>' + tiersHtml();
+      root.innerHTML += batchBar + '<div class="provider-list">' + items + '</div>' + ephemeralSection + '<div class="provider-add-row"><button type="button" class="button provider-add-bottom" id="provider-add">＋ 新增 API</button><button type="button" class="button provider-add-bottom" id="provider-import-agent">＋ 导入外部 Agent</button></div>' + tiersHtml();
 
       if (!isExt) {
         root.querySelector('#provider-kind').value = p.provider || 'openai-compatible';

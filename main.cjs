@@ -110,11 +110,36 @@ function finishFileAudit(){
 }
 
 const providerFile = () => path.join(app.getPath('userData'), 'provider-config.json');
+const ephemeralRelays = new Map();
+let ephemeralActiveId = '';
 let providerWrites=Promise.resolve();
 function serializeProviderWrite(action){const result=providerWrites.then(action);providerWrites=result.catch(()=>{});return result;}
-async function storeProviderConfig(config){await fs.mkdir(path.dirname(providerFile()),{recursive:true});const pending=providerFile()+'.tmp';await fs.writeFile(pending,JSON.stringify(config,null,2),'utf8');await fs.rename(pending,providerFile());}
+async function storeProviderConfig(config){
+  const all = providerProfiles(config);
+  const persistent = all.filter(x => !x.ephemeral && x.agentTransport !== 'mcp-relay');
+  for (const x of all) {
+    if (x.ephemeral || x.agentTransport === 'mcp-relay') ephemeralRelays.set(x.id, { ...x, ephemeral: true });
+  }
+  ephemeralActiveId = ephemeralRelays.has(config?.activeProfileId) ? String(config.activeProfileId) : '';
+  const diskActive = persistent.some(x => x.id === config?.activeProfileId) ? config.activeProfileId : (persistent[0]?.id || '');
+  const diskDoc = {
+    schema: 2,
+    activeProfileId: String(diskActive || ''),
+    profiles: persistent,
+    modelTiers: modelTiers.prune(config?.modelTiers, vendorList({ profiles: persistent })).tiers
+  };
+  await fs.mkdir(path.dirname(providerFile()),{recursive:true});
+  const pending=providerFile()+'.tmp';
+  await fs.writeFile(pending,JSON.stringify(diskDoc,null,2),'utf8');
+  await fs.rename(pending,providerFile());
+}
 async function readProviderConfig() {
-  try { return JSON.parse(await fs.readFile(providerFile(), 'utf8')); } catch { return {}; }
+  let raw = {};
+  try { raw = JSON.parse(await fs.readFile(providerFile(), 'utf8')); } catch {}
+  const persistent = providerProfiles(raw).filter(x => !x.ephemeral && x.agentTransport !== 'mcp-relay');
+  const profiles = [...persistent, ...ephemeralRelays.values()];
+  const activeProfileId = (ephemeralActiveId && ephemeralRelays.has(ephemeralActiveId)) ? ephemeralActiveId : (raw.activeProfileId || profiles[0]?.id || '');
+  return { ...raw, activeProfileId, profiles };
 }
 function providerProfiles(raw = {}) {
   if (Array.isArray(raw.profiles) && raw.profiles.length) return raw.profiles;
@@ -132,6 +157,7 @@ function publicProfile(profile = {}) {
     name: profile.name || profile.provider || (external ? '外部 Agent' : 'API'),
     kind: external ? 'external-agent' : 'api',
     agentTransport: transport,
+    ephemeral: Boolean(profile.ephemeral || transport === 'mcp-relay'),
     relayOnline: transport === 'mcp-relay' ? Boolean(pairingServer?.isRelayOnline(profile.id)) : undefined,
     provider: profile.provider || (external ? transport : 'openai-compatible'),
     baseUrl: profile.baseUrl !== undefined ? profile.baseUrl : defaultBase,
@@ -1129,6 +1155,8 @@ if(primaryInstance)app.whenReady().then(() => {
   }));
   ipcMain.handle('provider:delete', async (event, input = {}) => serializeProviderWrite(async()=>{
     checkShell(event);
+    ephemeralRelays.delete(input.profileId);
+    if (ephemeralActiveId === input.profileId) ephemeralActiveId = '';
     const raw = await readProviderConfig();
     const profiles = providerProfiles(raw).filter(x => x.id !== input.profileId);
     if (!profiles.length) return { ok: false, error: '至少保留一个 API 配置' };
@@ -1140,6 +1168,10 @@ if(primaryInstance)app.whenReady().then(() => {
     checkShell(event);
     const ids = new Set((Array.isArray(input.profileIds) ? input.profileIds : []).map(x => String(x || '').trim()).filter(Boolean));
     if (!ids.size) return { ok: false, error: '请先勾选要删除的配置' };
+    for (const delId of ids) {
+      ephemeralRelays.delete(delId);
+      if (ephemeralActiveId === delId) ephemeralActiveId = '';
+    }
     const raw = await readProviderConfig();
     const all = providerProfiles(raw);
     const profiles = all.filter(x => !ids.has(x.id));
@@ -1342,6 +1374,7 @@ if(primaryInstance)app.whenReady().then(() => {
             name: candidate.name,
             kind: candidate.kind,
             agentTransport: candidate.agentTransport,
+            ephemeral: candidate.agentTransport === 'mcp-relay',
             provider: candidate.provider,
             baseUrl: candidate.baseUrl,
             command: candidate.command,
@@ -1378,6 +1411,8 @@ if(primaryInstance)app.whenReady().then(() => {
               probing,
               name: candidate.name,
               agentTransport: transport,
+              ephemeral: transport === 'mcp-relay',
+              persistence: transport === 'mcp-relay' ? 'ephemeral' : 'persistent',
               capabilities,
               workbenchAvailable: Boolean(capabilities?.workbench),
               viaMcp: Boolean(meta.viaMcp)
@@ -1425,7 +1460,7 @@ if(primaryInstance)app.whenReady().then(() => {
             }
           })();
         }
-        return { profileId: id, name: candidate.name, agentTransport: transport, capabilities, probing };
+        return { profileId: id, name: candidate.name, agentTransport: transport, persistence: transport === 'mcp-relay' ? 'ephemeral' : 'persistent', capabilities, probing };
       }
     });
     return pairingServer;
