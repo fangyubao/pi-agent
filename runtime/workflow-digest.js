@@ -20,7 +20,7 @@
 (function (root, factory) { const api = factory(); if (typeof module === 'object' && module.exports) module.exports = api; else root.PiWorkflowDigest = api; })(typeof window === 'object' ? window : globalThis, () => {
   // 页面上允许的最大长度（code point）。提示词里给模型的上限更紧（PROMPT_LIMITS），留出约 40% 余量：
   // 模型数中文字数并不准，略超时直接保留比截成半句话更好读；真正失控的超长才截断。
-  const LIMITS = { headline: 60, finding: 70, findings: 5, gist: 60, point: 50, points: 5, path: 8, caveat: 70, caveats: 3, from: 4 };
+  const LIMITS = { headline: 60, finding: 70, findings: 5, gist: 60, point: 50, points: 5, path: 8, caveat: 70, caveats: 3, from: 4, metrics: 4, metricLabel: 16, metricValue: 24, metricNote: 36 };
   const PROMPT_LIMITS = { headline: 40, finding: 50, gist: 40, point: 36, caveat: 50 };
   // 输入预算：所有节点结果合计最多 TOTAL_CHARS 字，单节点 [MIN, MAX]。8000 中文字 ≈ 5–8k token，是一次“便宜档”调用能接受的上限。
   const BUDGET = { TOTAL_CHARS: 8000, PER_NODE_MAX: 2400, PER_NODE_MIN: 300 };
@@ -38,12 +38,13 @@
     '- 简体中文，一句话只说一件事。',
     '字段与字数上限：',
     'headline：≤' + PROMPT_LIMITS.headline + '字，整个工作流最重要的一句结论（回答“所以呢？”）。',
+    'metrics：最多4条核心指标，每条{"label":"指标名≤12字","value":"带单位数值","note":"简短说明≤24字"}；只提取原文明确给出的关键数字/规格/结论值，没有就给 []。',
     'findings：最多5条，每条≤' + PROMPT_LIMITS.finding + '字，最重要的在前；from=依据的节点 id。',
     'nodes：给出结果的每个节点一项；gist≤' + PROMPT_LIMITS.gist + '字，一句话结论；points 最多5条（通常3条），每条≤' + PROMPT_LIMITS.point + '字，写具体的事实、数字或建议，不要重复 gist。',
     'path：建议阅读的节点 id 顺序，最多6个，先看结论再看依据。',
     'caveats：最多3条，每条≤' + PROMPT_LIMITS.caveat + '字，只写资料里的矛盾、明确提到的风险与假设、待核实项、需要用户拍板的事；没有就给 []。',
     '只输出一个 JSON 对象，不要 markdown 围栏，不要解释：',
-    '{"headline":"","findings":[{"text":"","from":["n0"]}],"nodes":[{"id":"n0","gist":"","points":[""]}],"path":[],"caveats":[]}'
+    '{"headline":"","metrics":[{"label":"","value":"","note":""}],"findings":[{"text":"","from":["n0"]}],"nodes":[{"id":"n0","gist":"","points":[""]}],"path":[],"caveats":[]}'
   ].join('\n');
 
   // ---------- 文本工具 ----------
@@ -168,7 +169,19 @@
       return true;
     };
     const headline = clip(plain(Array.isArray(d.headline) ? d.headline.join('，') : d.headline), LIMITS.headline);
-    const out = { v: 1, source: d.source === 'fallback' ? 'fallback' : 'model', headline: usable(headline, allSource, 'headline') ? headline : '', findings: [], nodes: {}, path: [], caveats: [] };
+    const out = { v: 1, source: d.source === 'fallback' ? 'fallback' : 'model', headline: usable(headline, allSource, 'headline') ? headline : '', metrics: [], findings: [], nodes: {}, path: [], caveats: [] };
+
+    if (Array.isArray(d.metrics)) {
+      for (const m of d.metrics.slice(0, LIMITS.metrics * 2)) {
+        if (!m || typeof m !== 'object') continue;
+        const label = clip(plain(m.label), LIMITS.metricLabel);
+        const value = clip(plain(m.value), LIMITS.metricValue);
+        const note = clip(plain(m.note), LIMITS.metricNote);
+        if (label && value && usable(label + ' ' + value + ' ' + note, allSource, 'metric') && out.metrics.length < LIMITS.metrics) {
+          out.metrics.push({ label, value, note });
+        }
+      }
+    }
 
     const findings = asList(d.findings).slice(0, LIMITS.findings * 2);
     if (asList(d.findings).length > LIMITS.findings) warnings.push('findings 超过 ' + LIMITS.findings + ' 条，已截断');
@@ -206,7 +219,7 @@
       const m = SUMMARIZABLE.includes(statusOf(n)) ? d.nodes[n.id] : null, f = fb.nodes[n.id];
       merged[n.id] = m ? { gist: m.gist || f.gist, points: m.points.length ? m.points : f.points, auto: m.auto || !m.gist } : f;
     }
-    return { v: 1, source: d.source, headline: d.headline || fb.headline, findings: d.findings.length ? d.findings : fb.findings, nodes: merged, path: d.path.length ? d.path : fb.path, caveats: d.caveats, autoHeadline: !d.headline };
+    return { v: 1, source: d.source, headline: d.headline || fb.headline, ...(d.metrics && d.metrics.length ? { metrics: d.metrics } : {}), findings: d.findings.length ? d.findings : fb.findings, nodes: merged, path: d.path.length ? d.path : fb.path, caveats: d.caveats, autoHeadline: !d.headline };
   }
 
   // ---------- 提取 JSON ----------

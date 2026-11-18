@@ -317,7 +317,8 @@
     var live = $('.wfv-live');
     var say = function (msg) { if (live) live.textContent = msg; };
     var search = $('.wfv-search'), fAgent = $('.wfv-filter-agent'), fStatus = $('.wfv-filter-status'), count = $('.wfv-count'), empty = $('.wfv-empty');
-    var current = null, spy = null, timer = null;
+    var demoBtn = $('.wfv-demo-toggle'), demoPrev = $('.wfv-demo-prev'), demoNext = $('.wfv-demo-next');
+    var current = null, spy = null, timer = null, demoMode = false;
 
     // 生成时间按查看者的本地时区重新显示。
     $$('time[datetime]').forEach(function (t) { var d = new Date(t.getAttribute('datetime')); if (!isNaN(d.getTime())) t.textContent = d.toLocaleString('zh-CN', { hour12: false }); });
@@ -351,7 +352,8 @@
     function visibleOrder() { return nodes.map(function (n) { return n.k; }).filter(function (k) { var c = card(k); return c && !c.hasAttribute('hidden'); }); }
     function goTo(k, expand) {
       var c = card(k); if (!c) return;
-      if (c.hasAttribute('hidden')) clearAll(true);
+      if (!demoMode && c.hasAttribute('hidden')) clearAll(true);
+      if (demoMode) { current = k; apply(); c = card(k); }
       if (expand && levelOf(c) === 0) setLevel(c, 1);
       select(k);
       if (c.scrollIntoView) c.scrollIntoView({ block: 'start', behavior: reduce ? 'auto' : 'smooth' });
@@ -399,19 +401,32 @@
         nodes.forEach(function (n) { var c = card(n.k); if (!c) return; var r = markIn(c, q); if (r.hits) { hits[n.k] = true; need[n.k] = r.level; total += r.hits; } });
       }
       var vis = lib.visible(nodes, { agent: fAgent ? fAgent.value : '', status: fStatus ? fStatus.value : '', hits: hits }), shown = 0;
+      var pool = nodes.map(function (n) { return n.k; }).filter(function (k) { return !!vis[k]; });
+      var focusKey = demoMode ? (pool.indexOf(current) >= 0 ? current : (pool[0] || null)) : null;
+      if (demoMode && focusKey) current = focusKey;
       nodes.forEach(function (n) {
-        var on = !!vis[n.k], c = card(n.k); if (on) shown++;
-        if (c) { hide(c, !on); if (on && q && need[n.k] > levelOf(c)) setLevel(c, need[n.k]); }
-        $$('.wfv-gnode[data-node="' + n.k + '"], .wfv-toc-link[data-node="' + n.k + '"], .wfv-flow-item[data-node="' + n.k + '"]').forEach(function (el) { el.classList.toggle('is-dim', !on); });
+        var match = !!vis[n.k], on = demoMode ? (match && n.k === focusKey) : match, c = card(n.k); if (on) shown++;
+        if (c) {
+          hide(c, !on);
+          if (on && demoMode && levelOf(c) === 0) setLevel(c, 1);
+          if (on && q && need[n.k] > levelOf(c)) setLevel(c, need[n.k]);
+        }
+        $$('.wfv-gnode[data-node="' + n.k + '"], .wfv-toc-link[data-node="' + n.k + '"], .wfv-flow-item[data-node="' + n.k + '"]').forEach(function (el) { el.classList.toggle('is-dim', !match); });
       });
+      if (demoBtn) demoBtn.classList.toggle('is-on', demoMode);
+      if (demoPrev) hide(demoPrev, !demoMode || pool.length < 2);
+      if (demoNext) hide(demoNext, !demoMode || pool.length < 2);
       var filtered = !!(q || (fAgent && fAgent.value) || (fStatus && fStatus.value));
       root.classList.toggle('is-filtered', filtered);
-      var msg = filtered ? '显示 ' + shown + ' / ' + nodes.length + ' 个步骤' + (q ? '，“' + q + '”共 ' + total + ' 处' : '') : '共 ' + nodes.length + ' 个步骤';
+      var msg = demoMode && focusKey
+        ? '单步演示：第 ' + (pool.indexOf(focusKey) + 1) + ' / ' + pool.length + ' 步'
+        : (filtered ? '显示 ' + shown + ' / ' + nodes.length + ' 个步骤' + (q ? '，“' + q + '”共 ' + total + ' 处' : '') : '共 ' + nodes.length + ' 个步骤');
       if (count) count.textContent = msg;
       hide(empty, shown > 0 || !nodes.length);
-      if (filtered) say(msg);
+      if (filtered || demoMode) say(msg);
     }
     function clearAll(quiet) {
+      demoMode = false;
       if (search) search.value = ''; if (fAgent) fAgent.value = ''; if (fStatus) fStatus.value = '';
       apply(); if (!quiet) { select(null); say('已清除搜索和筛选'); }
     }
@@ -467,6 +482,14 @@
       if (cls.contains('wfv-toggle')) { setLevel(c, levelOf(c) > 0 ? 0 : 1); select(c.getAttribute('data-node')); return; }
       if (cls.contains('wfv-full-toggle')) { setLevel(c, levelOf(c) === 2 ? 1 : 2); return; }
       if (cls.contains('wfv-expand-all') || cls.contains('wfv-collapse-all')) { var lv = cls.contains('wfv-expand-all') ? 1 : 0; $$('.wfv-node').forEach(function (el) { if (!el.hasAttribute('hidden')) setLevel(el, lv); }); say(lv ? '已展开全部步骤' : '已折叠全部步骤'); return; }
+      if (cls.contains('wfv-demo-toggle')) { demoMode = !demoMode; apply(); if (current) highlight(current); return; }
+      if (cls.contains('wfv-demo-prev') || cls.contains('wfv-demo-next')) {
+        var visNow = lib.visible(nodes, { agent: fAgent ? fAgent.value : '', status: fStatus ? fStatus.value : '', hits: null });
+        var poolNow = nodes.map(function (n) { return n.k; }).filter(function (k) { return !!visNow[k]; });
+        var nextK = lib.step(poolNow, current, cls.contains('wfv-demo-next') ? 1 : -1);
+        if (nextK) goTo(nextK, true);
+        return;
+      }
       if (cls.contains('wfv-sort')) { sortBy(t); return; }
       if (cls.contains('wfv-copy-tsv') || cls.contains('wfv-export-csv')) {
         var tbl = $('table', t.closest('.wfv-tablebox')), head = headOf(tbl), rows = shownRows(tbl);
@@ -586,6 +609,9 @@
     const auto = dg.source === 'fallback' || dg.autoHeadline;
     let h = '<section class="wfv-overview wfv-panel" id="wfv-overview" aria-labelledby="wfv-ov-h"><h2 id="wfv-ov-h" class="wfv-h2">一句话结论</h2>';
     h += '<p class="wfv-headline">' + esc(dg.headline || '暂无结论') + '</p>';
+    if (Array.isArray(dg.metrics) && dg.metrics.length) {
+      h += '<div class="wfv-metrics" aria-label="核心指标">' + dg.metrics.map(m => '<div class="wfv-metric"><span class="wfv-metric-label">' + esc(m.label) + '</span><strong class="wfv-metric-val">' + esc(m.value) + '</strong>' + (m.note ? '<span class="wfv-metric-note">' + esc(m.note) + '</span>' : '') + '</div>').join('') + '</div>';
+    }
     if (auto && total) h += '<p class="wfv-note">以上结论是从原文自动摘录的，未经模型整理，建议对照下方详情阅读。</p>';
     if (total) {
       h += '<div class="wfv-progress" role="img" aria-label="' + esc('已完成 ' + counts.done + ' / ' + total + ' 步') + '">' + STATUS_ORDER.filter(s => counts[s]).map(s => '<span class="wfv-seg" data-status="' + s + '" style="flex-grow:' + counts[s] + '"></span>').join('') + '</div>';
@@ -650,7 +676,7 @@
     for (const a of n.artifacts) {
       const href = esc(a.path), name = esc(a.name), tag = '<span class="wfv-artkind" data-kind="' + a.kind + '">' + KIND_NAME[a.kind] + '</span>';
       if (a.kind === 'image') h += '<figure class="wfv-art wfv-art-image">' + '<a href="' + href + '" target="_blank" rel="noopener noreferrer"><img src="' + href + '" alt="' + name + '"></a><figcaption>' + tag + ' ' + name + ' <a class="wfv-btn" href="' + href + '" download>下载</a></figcaption></figure>';
-      else if (a.kind === 'html') h += '<details class="wfv-art wfv-art-html"><summary>' + tag + ' ' + name + ' <span class="wfv-muted">点击预览</span></summary><iframe class="wfv-frame" title="' + name + '" src="' + href + '" sandbox="allow-scripts" loading="lazy" referrerpolicy="no-referrer"></iframe><p class="wfv-note"><a class="wfv-btn" href="' + href + '" target="_blank" rel="noopener noreferrer">在浏览器中单独打开</a></p></details>';
+      else if (a.kind === 'html') h += '<details class="wfv-art wfv-art-html" open><summary>' + tag + ' ' + name + ' <span class="wfv-muted">交互演示预览</span></summary><iframe class="wfv-frame" title="' + name + '" src="' + href + '" sandbox="allow-scripts" loading="lazy" referrerpolicy="no-referrer"></iframe><p class="wfv-note"><a class="wfv-btn" href="' + href + '" target="_blank" rel="noopener noreferrer">在浏览器中单独打开</a></p></details>';
       else h += '<p class="wfv-art wfv-art-file">' + tag + ' <a href="' + href + '" target="_blank" rel="noopener noreferrer">' + name + '</a>' + (a.bytes ? ' <span class="wfv-muted">' + fmtB(a.bytes) + '</span>' : '') + '</p>';
     }
     return h + '</div>';
@@ -693,6 +719,7 @@
       (p.agents.length > 1 ? '<label class="wfv-field"><span class="wfv-sr">按子智能体筛选</span><select class="wfv-filter-agent" aria-label="按子智能体筛选"><option value="">全部子智能体</option>' + agentsOpt + '</select></label>' : '') +
       '<label class="wfv-field"><span class="wfv-sr">按状态筛选</span><select class="wfv-filter-status" aria-label="按状态筛选"><option value="">全部状态</option>' + statusOpt + '</select></label>' +
       '<span class="wfv-group"><button type="button" class="wfv-btn wfv-expand-all">全部展开</button><button type="button" class="wfv-btn wfv-collapse-all">全部折叠</button></span>' +
+      (p.nodes.length > 1 ? '<span class="wfv-group" aria-label="单步演示"><button type="button" class="wfv-btn wfv-demo-toggle">单步演示</button><button type="button" class="wfv-btn wfv-demo-prev" hidden>◀ 上一步</button><button type="button" class="wfv-btn wfv-demo-next" hidden>下一步 ▶</button></span>' : '') +
       '<span class="wfv-group" aria-label="字号"><button type="button" class="wfv-btn wfv-font-dec" aria-label="缩小字号">A-</button><button type="button" class="wfv-btn wfv-font-inc" aria-label="放大字号">A+</button></span>' +
       '<span class="wfv-toolbar-actions">' + (counts.error + counts.stale ? '<button type="button" class="wfv-btn wfv-show-problems">只看有问题的</button>' : '') + '<button type="button" class="wfv-btn wfv-clear">清除筛选</button></span>' +
       '<span class="wfv-count" aria-live="polite">共 ' + p.nodes.length + ' 个步骤</span></div>';
@@ -747,6 +774,10 @@
     '.wfv-h2{font-size:1.15em;margin-bottom:6px}.wfv-h3{font-size:1em;margin:14px 0 4px}.wfv-note{color:var(--muted);font-size:.875em;max-width:40em}.wfv-label{color:var(--muted);font-size:.875em;margin-right:4px}',
     '.wfv-flow-head{display:flex;gap:12px;justify-content:space-between;align-items:flex-start}.wfv-flow-meta{color:var(--muted);font-size:.875em;white-space:nowrap;margin:.2em 0 0}.wfv-flow-meta strong{color:var(--text);font-size:1.1em}',
     '.wfv-headline{font-size:1.3em;font-weight:600;max-width:32em;overflow-wrap:anywhere}',
+    '.wfv-metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px;margin:12px 0}',
+    '.wfv-metric{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}',
+    '.wfv-metric-label{font-size:.8em;color:var(--muted)}.wfv-metric-val{font-size:1.25em;color:var(--accent-strong);line-height:1.3}.wfv-metric-note{font-size:.78em;color:var(--muted)}',
+    '.wfv-demo-toggle.is-on{background:var(--accent-soft);border-color:var(--accent);color:var(--accent-strong);font-weight:600}',
     '.wfv-progress{display:flex;height:10px;border-radius:5px;overflow:hidden;background:var(--line);margin:10px 0 6px;max-width:40em}.wfv-seg{display:block;min-width:4px}',
     '.wfv-seg[data-status=done]{background:var(--ok)}.wfv-seg[data-status=stale]{background:var(--warn)}.wfv-seg[data-status=error]{background:var(--error)}.wfv-seg[data-status=running]{background:var(--accent)}.wfv-seg[data-status=todo]{background:var(--line)}',
     '.wfv-stats{display:flex;flex-wrap:wrap;gap:6px 16px;list-style:none;padding:0;margin:0;font-size:.9em}',
