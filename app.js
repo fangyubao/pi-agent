@@ -1283,7 +1283,12 @@
     if(!workflowEnabled(c)||current()?.task!==c.task)return null;
     if(!(active?.id==='workflow'&&active.taskId===c.task.id))openWorkbench('workflow','use','workflow',false,true);
     const session=active;if(!session||session.id!=='workflow')return null;
-    const nodes=window.PiModelTiers?window.PiModelTiers.assignAll(plan.plan.nodes,await workflowTiers()):plan.plan.nodes;
+    const cfg=await window.piDesktop?.provider?.getConfig?.();
+    const tiers=window.PiModelTiers?.normalize(cfg?.modelTiers)||[];
+    const vendors=await workflowModels();
+    const nodes=window.PiModelLeaderboard?.assignByDomain
+      ?window.PiModelLeaderboard.assignByDomain(plan.plan.nodes,{tiers,vendors,snapshot:cfg?.rankings,tiersApi:window.PiModelTiers})
+      :(window.PiModelTiers?window.PiModelTiers.assignAll(plan.plan.nodes,tiers):plan.plan.nodes);
     try{await runWorkbenchAction(session,'setPlan',{goal:plan.goal,nodes},'ui');void pushWorkflowModels();}
     catch(error){notify('计划写入失败：'+error.message);return null;}
     const written=located(c.task.id)?.task.workbenches.workflow?.nodes||plan.plan.nodes;      // 取写入后的节点（已重新编号）

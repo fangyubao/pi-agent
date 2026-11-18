@@ -241,6 +241,77 @@
     });
   }
 
+  function difficultyNum(tier) {
+    if (Number.isInteger(tier) && tier >= 1 && tier <= 5) return tier;
+    return { light: 1, standard: 3, strong: 5 }[tier] || 3;
+  }
+
+  // 为工作流节点和多子智能体按“任务所属领域排行榜 + 难度档位”联合分配最匹配的模型。
+  // - 用户手动锁定的节点（source:'user'）保持不动；
+  // - 已配置 5 档时：以难度对应的基准档位为中心（允许相邻档位参与本领域竞选），挑在该节点领域（如编程、数学推理、文学创意）得分最高的模型；
+  // - 未配置 5 档但有多个可用模型（vendors）时：直接按该节点领域的本地排名与难度选最匹配的模型。
+  function assignByDomain(nodes = [], { tiers = [], vendors = [], snapshot = null, tiersApi = null } = {}) {
+    const snap = snapshot && Array.isArray(snapshot.models) ? snapshot : defaultSnapshot();
+    const normTiers = tiersApi ? tiersApi.normalize(tiers) : (Array.isArray(tiers) ? tiers : []);
+    const configuredTiers = normTiers
+      .map((t, idx) => (t && t.profileId && t.model ? { profileId: t.profileId, model: t.model, tier: idx, entry: matchModel(t.model, snap) } : null))
+      .filter(Boolean);
+
+    const vendorPool = [];
+    for (const v of (Array.isArray(vendors) ? vendors : [])) {
+      for (const m of (Array.isArray(v?.models) ? v.models : [])) {
+        vendorPool.push({
+          profileId: String(v.profileId),
+          model: String(m),
+          entry: matchModel(m, snap)
+        });
+      }
+    }
+
+    const scoreIn = (item, catId) => item?.entry ? (Number(item.entry.scores?.[catId]) || Number(item.entry.scores?.overall) || 85) : 84;
+
+    return (Array.isArray(nodes) ? nodes : []).map(n => {
+      if (!n || typeof n !== 'object') return n;
+      if (n.model && n.model.source === 'user') return n;
+      const catId = inferCategory(n);
+      const d = difficultyNum(n.tier);
+
+      if (configuredTiers.length === 1) {
+        const only = configuredTiers[0];
+        return { ...n, category: catId, model: { profileId: only.profileId, model: only.model, source: 'auto', tier: only.tier, category: catId } };
+      }
+
+      if (configuredTiers.length > 1) {
+        const baseSlot = tiersApi ? tiersApi.pickTier(normTiers, d) : configuredTiers[Math.min(configuredTiers.length - 1, Math.floor(((d - 1) / 4) * configuredTiers.length))].tier;
+        // 专项领域（非 overall）允许在基准档位附近（[-1, +2] 档内）挑选该领域排名第一的专长模型
+        const radius = catId === 'overall' ? 0 : 1;
+        const band = configuredTiers.filter(t => t.tier >= baseSlot - radius && t.tier <= baseSlot + radius);
+        const pool = band.length ? band : configuredTiers;
+        const best = [...pool].sort((a, b) => (scoreIn(b, catId) - scoreIn(a, catId)) || (Math.abs(a.tier - baseSlot) - Math.abs(b.tier - baseSlot)))[0];
+        return {
+          ...n,
+          category: catId,
+          model: { profileId: best.profileId, model: best.model, source: 'auto', tier: best.tier, category: catId }
+        };
+      }
+
+      if (vendorPool.length > 0) {
+        // 未配 5 档但拥有多个模型：按该领域的排行榜得分排序，高难度或专项任务直接选该领域排名最前的模型
+        const sorted = [...vendorPool].sort((a, b) => scoreIn(a, catId) - scoreIn(b, catId));
+        const ratio = catId !== 'overall' && d >= 3 ? 1 : (d - 1) / 4;
+        const idx = Math.min(sorted.length - 1, Math.round(ratio * (sorted.length - 1)));
+        const pick = sorted[Math.max(0, idx)];
+        return {
+          ...n,
+          category: catId,
+          model: { profileId: pick.profileId, model: pick.model, source: 'auto', tier: Math.max(0, d - 1), category: catId }
+        };
+      }
+
+      return { ...n, category: catId, model: null };
+    });
+  }
+
   // 在线刷新公开榜单数据（可选：连接公开 JSON/CSV 源更新分数；失败或离线时安全保留现有快照）。
   async function refreshRankings({ currentSnapshot = null, fetchImpl = typeof fetch === 'function' ? fetch : null, timeoutMs = 8000 } = {}) {
     const base = currentSnapshot && Array.isArray(currentSnapshot.models) && currentSnapshot.models.length ? currentSnapshot : defaultSnapshot();
@@ -279,6 +350,7 @@
     describeModel,
     inferCategory,
     recommendTiers,
+    assignByDomain,
     refreshRankings
   };
 });

@@ -48,4 +48,22 @@ test('任务领域自动识别与 5 档智能推荐：按领域关键词归类�
   assert.equal(tiers.length, 5);
   assert.equal(tiers[0].model, 'opencode/glm-5.3-flash-free');
   assert.equal(tiers[4].model, 'gpt-6.1-sol');
+
+  // 工作流按领域排名路由：同一批档位下，编程节点自动选编程榜更高的 qwen-2.5-coder-32b，数学节点自动选数学榜更高的 qwq-32b
+  const T = require('./model-tiers.js');
+  const customTiers = [
+    { profileId: 'p1', model: 'glm-flash' },
+    { profileId: 'p1', model: 'deepseek-flash' },
+    { profileId: 'p1', model: 'qwen-2.5-coder-32b' },
+    { profileId: 'p2', model: 'qwq-32b' },
+    { profileId: 'p2', model: 'claude-opus-4' }
+  ];
+  const assigned = LB.assignByDomain([
+    { id: 'n1', title: '后端接口与SQL代码开发', tier: 3 },
+    { id: 'n2', title: '量子矩阵方程与概率证明', tier: 3 }
+  ], { tiers: customTiers, tiersApi: T });
+  assert.equal(assigned[0].category, 'coding');
+  assert.equal(assigned[0].model.model, 'qwen-2.5-coder-32b');
+  assert.equal(assigned[1].category, 'math');
+  assert.equal(assigned[1].model.model, 'qwq-32b');
 });
