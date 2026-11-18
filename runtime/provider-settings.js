@@ -82,6 +82,9 @@ window.PiProviderSettings = (() => {
           onChange(config);
           draw();
         } else onChange(config);
+      } else if (event.rankingsUpdated) {
+        onChange(config);
+        draw(displayed || selected());
       } else if (event.probedProfileId) {
         const wbLabel = event.workbenchAvailable || event.capabilities?.workbench ? '工作台可用 ✓' : '工作台不可用 ✕（仅对话/工作流）';
         draft = null;
@@ -217,21 +220,63 @@ window.PiProviderSettings = (() => {
       .map(x => ({ profileId: x.id, vendor: x.name, models: [...new Set([...(x.models || []), ...(x.model ? [x.model] : [])])] }))
       .filter(v => v.models.length);
 
+    function allOwnedModelIds() {
+      const fromProfiles = profiles.flatMap(x => [...(x.models || []), ...(x.discoveredModels || []), ...(x.model ? [x.model] : [])]);
+      const fromDom = root ? [...root.querySelectorAll('[data-model-slot]')].map(el => el.value) : [];
+      return [...new Set([...fromProfiles, ...fromDom].map(x => String(x || '').trim()).filter(Boolean))];
+    }
+
+    function rankBadgesHtml(modelId) {
+      const m = String(modelId || '').trim();
+      if (!m || !window.PiModelLeaderboard) return '';
+      const desc = window.PiModelLeaderboard.describeModel(m, allOwnedModelIds(), config.rankings);
+      if (!desc) return '<div class="model-rank-strip muted">暂无公开榜单匹配记录（自定义模型或通用路由 ID）</div>';
+      const pills = Object.values(desc.domains).map(d =>
+        '<span class="model-rank-pill' + (d.isLocalTop ? ' is-top' : '') + '" title="' + esc(d.label + '得分 ' + d.score + ' · 全球第 ' + d.globalRank + ' / ' + d.globalTotal + ' 名') + '">' +
+        '<b>' + esc(d.label) + '</b> 本地第 ' + d.localRank + '/' + d.localTotal + ' 名' + (d.isLocalTop ? ' ⭐' : '') +
+        ' <small>全球#' + d.globalRank + '</small></span>'
+      ).join('');
+      return '<div class="model-rank-strip"><div class="model-rank-head">📊 <strong>' + esc(desc.label) + '</strong><span>与当前已拥有模型对比 &amp; 权威榜单排名</span></div><div class="model-rank-pills">' + pills + '</div></div>';
+    }
+
+    function refreshVisibleRankStrips() {
+      for (const slot of root.querySelectorAll('[data-model-slot]')) {
+        const holder = root.querySelector('[data-slot-rank="' + slot.dataset.modelSlot + '"]');
+        if (holder) holder.innerHTML = rankBadgesHtml(slot.value);
+      }
+      for (let i = 0; i < 5; i++) {
+        const vendorEl = root.querySelector('[data-tier-vendor="' + i + '"]');
+        const modelEl = root.querySelector('[data-tier-model="' + i + '"]');
+        const holder = root.querySelector('[data-tier-rank="' + i + '"]');
+        if (holder) holder.innerHTML = rankBadgesHtml(vendorEl?.value && modelEl?.value ? modelEl.value : '');
+      }
+    }
+
     function tiersHtml() {
       const tiers = window.PiModelTiers.normalize(config.modelTiers), vendors = vendorsOf(), labels = window.PiModelTiers.LABELS;
+      const autoRefresh = config.rankingSettings?.autoRefresh !== false;
+      const snap = config.rankings || window.PiModelLeaderboard?.defaultSnapshot?.();
       const rows = tiers.map((t, i) => {
         const vendor = vendors.find(v => v.profileId === (t && t.profileId)) || null;
-        return '<div class="tier-row" data-tier="' + i + '"><span class="tier-name">' + labels[i] + '</span>' +
+        const activeModel = vendor && t ? t.model : '';
+        return '<div class="tier-block"><div class="tier-row" data-tier="' + i + '"><span class="tier-name">' + labels[i] + '</span>' +
           '<select class="dialog-input" data-tier-vendor="' + i + '" aria-label="' + labels[i] + ' 厂商"><option value="">不使用</option>' + vendors.map(v => '<option value="' + esc(v.profileId) + '"' + (vendor && vendor.profileId === v.profileId ? ' selected' : '') + '>' + esc(v.vendor) + '</option>').join('') + '</select>' +
-          '<select class="dialog-input" data-tier-model="' + i + '" aria-label="' + labels[i] + ' 模型"' + (vendor ? '' : ' disabled') + '>' + (vendor ? vendor.models.map(m => '<option value="' + esc(m) + '"' + (t.model === m ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : '<option value="">先选厂商</option>') + '</select></div>';
+          '<select class="dialog-input" data-tier-model="' + i + '" aria-label="' + labels[i] + ' 模型"' + (vendor ? '' : ' disabled') + '>' + (vendor ? vendor.models.map(m => '<option value="' + esc(m) + '"' + (t.model === m ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : '<option value="">先选厂商</option>') + '</select></div>' +
+          '<div class="tier-rank-holder" data-tier-rank="' + i + '">' + rankBadgesHtml(activeModel) + '</div></div>';
       }).join('');
-      return '<section class="provider-tiers" id="provider-tiers"><div class="provider-model-heading"><strong>模型档位 · 最多 5 档</strong></div><p class="settings-note">档位 1 最轻最便宜，档位 5 最强。工作流里每个节点按难度自动用这些档位的模型；只配一档，所有节点都用它；两档就分成轻重两段；一档都不配则全部用主模型。仅展示支持工作流的 API 与外部 Agent。</p>' + rows + '<p class="provider-status" id="tier-status" role="status"></p></section>';
+      return '<section class="provider-tiers" id="provider-tiers"><div class="provider-model-heading"><strong>模型档位 · 最多 5 档（融合权威分类排行榜）</strong>' +
+        '<div class="tier-toolbar-actions"><button type="button" class="button" id="tier-auto-recommend"' + (vendors.length ? '' : ' disabled') + '>按排行榜智能填入 5 档</button>' +
+        '<button type="button" class="button" id="tier-refresh-rankings">刷新排行榜</button></div></div>' +
+        '<div class="tier-meta-row"><span class="settings-note">榜单基准：' + esc(snap?.source || 'LMSYS Arena & LiveBench') + '（含编程、数学推理、科学知识、文学创意、指令遵循、综合 6 大领域）</span>' +
+        '<label class="provider-active tier-auto-check"><input type="checkbox" id="tier-auto-refresh"' + (autoRefresh ? ' checked' : '') + '> 启动时自动刷新排行榜</label></div>' +
+        '<p class="settings-note">档位 1 最轻最便宜，档位 5 最强。选中模型后下方实时显示它在各领域的全球排名，以及跟当前已拥有模型相比排第几名。</p>' + rows + '<p class="provider-status" id="tier-status" role="status"></p></section>';
     }
 
     function wireTiers() {
       const box = root.querySelector('#provider-tiers'); if (!box) return;
       const vendors = vendorsOf();
       const save = async () => {
+        refreshVisibleRankStrips();
         const tiers = [...Array(5).keys()].map(i => { const pid = box.querySelector('[data-tier-vendor="' + i + '"]').value, m = box.querySelector('[data-tier-model="' + i + '"]').value; return pid && m ? { profileId: pid, model: m } : null; });
         const r = await window.piDesktop.provider.saveTiers(tiers), label = box.querySelector('#tier-status');
         if (r && r.ok) { config = r.config; onChange(config); label.textContent = '已保存 ' + window.PiModelTiers.configured(config.modelTiers).length + ' 档'; } else label.textContent = (r && r.error) || '保存失败';
@@ -242,6 +287,50 @@ window.PiProviderSettings = (() => {
         model.disabled = !v; save();
       }));
       box.querySelectorAll('[data-tier-model]').forEach(sel => sel.addEventListener('change', save));
+
+      const refreshBtn = box.querySelector('#tier-refresh-rankings');
+      if (refreshBtn) refreshBtn.onclick = async () => {
+        const label = box.querySelector('#tier-status');
+        refreshBtn.disabled = true;
+        if (label) label.textContent = '正在刷新权威大模型分类排行榜并重新整理已有模型…';
+        try {
+          const r = await window.PiProviderManager.refreshRankings();
+          if (r?.ok) {
+            if (r.config) config = r.config;
+            else if (r.rankings) config.rankings = r.rankings;
+            refreshVisibleRankStrips();
+            if (label) label.textContent = '排行榜已刷新并完成本地模型库各领域重排';
+          } else if (label) label.textContent = '刷新失败：' + (r?.error || '未知错误');
+        } finally {
+          if (refreshBtn.isConnected) refreshBtn.disabled = false;
+        }
+      };
+
+      const autoCheck = box.querySelector('#tier-auto-refresh');
+      if (autoCheck) autoCheck.onchange = async () => {
+        const r = await window.PiProviderManager.saveRankingSettings({ autoRefresh: autoCheck.checked });
+        if (r?.ok && r.config) config = r.config;
+        const label = box.querySelector('#tier-status');
+        if (label) label.textContent = autoCheck.checked ? '已开启：启动时自动刷新排行榜' : '已关闭自动刷新（仅手动刷新）';
+      };
+
+      const recBtn = box.querySelector('#tier-auto-recommend');
+      if (recBtn) recBtn.onclick = async () => {
+        if (!window.PiModelLeaderboard) return;
+        const rec = window.PiModelLeaderboard.recommendTiers(vendors, config.rankings);
+        rec.forEach((t, i) => {
+          const vSel = box.querySelector('[data-tier-vendor="' + i + '"]');
+          const mSel = box.querySelector('[data-tier-model="' + i + '"]');
+          if (!vSel || !mSel || !t) return;
+          vSel.value = t.profileId;
+          const v = vendors.find(x => x.profileId === t.profileId);
+          mSel.innerHTML = v ? v.models.map(m => '<option value="' + esc(m) + '"' + (m === t.model ? ' selected' : '') + '>' + esc(m) + '</option>').join('') : '<option value="">先选厂商</option>';
+          mSel.disabled = !v;
+        });
+        await save();
+        const label = box.querySelector('#tier-status');
+        if (label) label.textContent = '已按分类排行榜将当前拥有的模型从轻到强填入 5 档';
+      };
     }
 
     function capabilityPanelHtml(p) {
@@ -288,7 +377,7 @@ window.PiProviderSettings = (() => {
         '</div><p class="provider-status" id="provider-status" role="status">' + esc(status || ('已选 ' + chosen.length + ' / 4 个')) + '</p>' +
         '<div class="provider-slots">' + Array.from({ length: 4 }, (_, i) => {
           const selectedModel = chosen[i];
-          return '<label class="dialog-label">' + (isExt ? 'Agent / 模型 ' : '模型 ') + (i + 1) + '<select class="dialog-input" data-model-slot="' + i + '" aria-label="常用模型 ' + (i + 1) + '"><option value="">不启用</option>' + all.map(x => '<option value="' + esc(x) + '" ' + (selectedModel === x ? 'selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label>';
+          return '<div class="model-slot-wrap"><label class="dialog-label">' + (isExt ? 'Agent / 模型 ' : '模型 ') + (i + 1) + '<select class="dialog-input" data-model-slot="' + i + '" aria-label="常用模型 ' + (i + 1) + '"><option value="">不启用</option>' + all.map(x => '<option value="' + esc(x) + '" ' + (selectedModel === x ? 'selected' : '') + '>' + esc(x) + '</option>').join('') + '</select></label><div class="model-rank-holder" data-slot-rank="' + i + '">' + rankBadgesHtml(selectedModel) + '</div></div>';
         }).join('') + '</div>';
     }
 
@@ -516,19 +605,19 @@ window.PiProviderSettings = (() => {
         }
       }
 
-      if (!isExt) {
-        for (const select of root.querySelectorAll('[data-model-slot]')) select.addEventListener('change', () => {
-          const slot = select.dataset.modelSlot, limits = p.modelLimits?.[select.value], metadata = p.modelMetadata?.[select.value];
-          root.querySelector('[data-effort-slot="' + slot + '"]').value = p.modelEfforts?.[select.value] || 'off';
-          const nm = root.querySelector('[data-adv-name="' + slot + '"]'); if (nm) nm.textContent = select.value || '模型 ' + (Number(slot) + 1) + '（未启用）';
-          const context = root.querySelector('[data-limit-slot="' + slot + '"]'), output = root.querySelector('[data-output-slot="' + slot + '"]');
-          context.dataset.limitModel = select.value;
-          context.value = limits?.contextWindow ?? '';
-          context.placeholder = metadata?.contextWindow ? '厂商：' + metadata.contextWindow : '未知 · 可手动填写';
-          output.value = limits?.maxOutputTokens ?? '';
-          output.placeholder = metadata?.maxOutputTokens ? '厂商：' + metadata.maxOutputTokens : '32768 · 运行时默认';
-        });
-      }
+      for (const select of root.querySelectorAll('[data-model-slot]')) select.addEventListener('change', () => {
+        refreshVisibleRankStrips();
+        if (isExt) return;
+        const slot = select.dataset.modelSlot, limits = p.modelLimits?.[select.value], metadata = p.modelMetadata?.[select.value];
+        root.querySelector('[data-effort-slot="' + slot + '"]').value = p.modelEfforts?.[select.value] || 'off';
+        const nm = root.querySelector('[data-adv-name="' + slot + '"]'); if (nm) nm.textContent = select.value || '模型 ' + (Number(slot) + 1) + '（未启用）';
+        const context = root.querySelector('[data-limit-slot="' + slot + '"]'), output = root.querySelector('[data-output-slot="' + slot + '"]');
+        context.dataset.limitModel = select.value;
+        context.value = limits?.contextWindow ?? '';
+        context.placeholder = metadata?.contextWindow ? '厂商：' + metadata.contextWindow : '未知 · 可手动填写';
+        output.value = limits?.maxOutputTokens ?? '';
+        output.placeholder = metadata?.maxOutputTokens ? '厂商：' + metadata.maxOutputTokens : '32768 · 运行时默认';
+      });
 
       const syncBatchBar = () => {
         const countEl = root.querySelector('#provider-batch-count');

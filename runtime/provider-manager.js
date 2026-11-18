@@ -58,9 +58,19 @@
     if (api?.deleteMany) return api.deleteMany(profileIds);
     return { ok: false, error: '浏览器预览模式不支持批量删除配置' };
   }
+  async function refreshRankings() {
+    const api = desktop();
+    if (api?.refreshRankings) return api.refreshRankings();
+    return { ok: true, rankings: window.PiModelLeaderboard?.defaultSnapshot?.() || null };
+  }
+  async function saveRankingSettings(input) {
+    const api = desktop();
+    if (api?.saveRankingSettings) return api.saveRankingSettings(input);
+    return { ok: true };
+  }
   function onUpdated(callback) {
     const api = desktop();
     return api?.onUpdated ? api.onUpdated(callback) : () => {};
   }
-  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport, startPairing, pairingStatus, openConnectDir, launchAgent, deleteMany, onUpdated });
+  window.PiProviderManager = Object.freeze({ getConfig, saveConfig, listModels, test, probeCapabilities, parseAgentImport, startPairing, pairingStatus, openConnectDir, launchAgent, deleteMany, refreshRankings, saveRankingSettings, onUpdated });
 })();

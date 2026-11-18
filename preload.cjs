@@ -71,7 +71,9 @@ contextBridge.exposeInMainWorld('piDesktop', Object.freeze({
       ipcRenderer.on('provider:updated', listener);
       return () => ipcRenderer.removeListener('provider:updated', listener);
     },
-    saveTiers: tiers => ipcRenderer.invoke('provider:save-tiers', { tiers })
+    saveTiers: tiers => ipcRenderer.invoke('provider:save-tiers', { tiers }),
+    refreshRankings: () => ipcRenderer.invoke('provider:refresh-rankings'),
+    saveRankingSettings: input => ipcRenderer.invoke('provider:save-ranking-settings', input)
   }),
   clipboard: Object.freeze({ writeText: text => ipcRenderer.invoke('clipboard:write', text) }),
   files: Object.freeze({ exportText: input => ipcRenderer.invoke('file:export-text', input) }),

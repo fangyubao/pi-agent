@@ -29,6 +29,7 @@ function callTextModel(cfg, request, options = {}) {
 }
 const { planWorkflow } = require('./runtime/workflow-plan-run.cjs');
 const modelTiers = require('./runtime/model-tiers.js');
+const modelLeaderboard = require('./runtime/model-leaderboard.js');
 const workspaceFiles = require('./runtime/workspace-files.cjs');
 const planControllers = new Map();
 let mcpStore = null;
@@ -110,6 +111,30 @@ function finishFileAudit(){
 }
 
 const providerFile = () => path.join(app.getPath('userData'), 'provider-config.json');
+const rankingsFile = () => path.join(app.getPath('userData'), 'model-rankings.json');
+let rankingSnapshot = modelLeaderboard.defaultSnapshot();
+async function readRankingsFile() {
+  try {
+    const parsed = JSON.parse(await fs.readFile(rankingsFile(), 'utf8'));
+    if (parsed && Array.isArray(parsed.models) && parsed.models.length) rankingSnapshot = parsed;
+  } catch {}
+  return rankingSnapshot;
+}
+async function refreshModelRankings({ broadcast = false } = {}) {
+  rankingSnapshot = await modelLeaderboard.refreshRankings({ currentSnapshot: rankingSnapshot });
+  try {
+    await fs.mkdir(path.dirname(rankingsFile()), { recursive: true });
+    await fs.writeFile(rankingsFile(), JSON.stringify(rankingSnapshot, null, 2), 'utf8');
+  } catch {}
+  if (broadcast) {
+    const doc = await readProviderConfig();
+    const pub = publicConfig(doc);
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send('provider:updated', { config: pub, rankingsUpdated: true });
+    }
+  }
+  return rankingSnapshot;
+}
 const ephemeralRelays = new Map();
 let ephemeralActiveId = '';
 let providerWrites=Promise.resolve();
@@ -126,7 +151,8 @@ async function storeProviderConfig(config){
     schema: 2,
     activeProfileId: String(diskActive || ''),
     profiles: persistent,
-    modelTiers: modelTiers.prune(config?.modelTiers, vendorList({ profiles: persistent })).tiers
+    modelTiers: modelTiers.prune(config?.modelTiers, vendorList({ profiles: persistent })).tiers,
+    rankingSettings: { autoRefresh: config?.rankingSettings?.autoRefresh !== false }
   };
   await fs.mkdir(path.dirname(providerFile()),{recursive:true});
   const pending=providerFile()+'.tmp';
@@ -191,7 +217,15 @@ function publicConfig(raw = {}) {
   const profiles = providerProfiles(raw).map(publicProfile);
   const activeProfileId = raw.activeProfileId || profiles[0]?.id || '';
   const current = profiles.find(x => x.id === activeProfileId) || profiles[0] || publicProfile();
-  return { ...current, profileId: current.id, activeProfileId: current.id, profiles, modelTiers: modelTiers.normalize(raw.modelTiers) };
+  return {
+    ...current,
+    profileId: current.id,
+    activeProfileId: current.id,
+    profiles,
+    modelTiers: modelTiers.normalize(raw.modelTiers),
+    rankings: rankingSnapshot,
+    rankingSettings: { autoRefresh: raw.rankingSettings?.autoRefresh !== false }
+  };
 }
 function cleanUrl(value, allowWs = false) {
   const url = String(value || '').trim().replace(/\/$/, '');
@@ -1133,15 +1167,37 @@ if(primaryInstance)app.whenReady().then(() => {
       next.apiKeyEncrypted = safeStorage.encryptString(String(input.apiKey).trim()).toString('base64');
     }
     if (index >= 0) profiles[index] = next; else profiles.push(next);
-    const document = { schema: 2, activeProfileId: String(input.makeActive === false ? (old.activeProfileId || profiles[0]?.id || id) : id), profiles, modelTiers: modelTiers.normalize(old.modelTiers) };
+    const document = { schema: 2, activeProfileId: String(input.makeActive === false ? (old.activeProfileId || profiles[0]?.id || id) : id), profiles, modelTiers: modelTiers.normalize(old.modelTiers), rankingSettings: old.rankingSettings };
     await storeProviderConfig(document);
+    if (index < 0 && typeof refreshModelRankings === 'function') void refreshModelRankings({ broadcast: true });
     return { ok: true, config: publicConfig(document) };
   }));
   ipcMain.handle('provider:save-tiers', async (event, input = {}) => serializeProviderWrite(async()=>{
     checkShell(event);
     const raw = await readProviderConfig();
     const { tiers } = modelTiers.prune(input.tiers, vendorList(raw));
-    const next = { schema: 2, activeProfileId: raw.activeProfileId || providerProfiles(raw)[0]?.id || '', profiles: providerProfiles(raw), modelTiers: tiers };
+    const next = { schema: 2, activeProfileId: raw.activeProfileId || providerProfiles(raw)[0]?.id || '', profiles: providerProfiles(raw), modelTiers: tiers, rankingSettings: raw.rankingSettings };
+    await storeProviderConfig(next);
+    return { ok: true, config: publicConfig(next) };
+  }));
+  ipcMain.handle('provider:refresh-rankings', async (event) => {
+    try {
+      checkShell(event);
+      await refreshModelRankings({ broadcast: true });
+      const raw = await readProviderConfig();
+      return { ok: true, rankings: rankingSnapshot, config: publicConfig(raw) };
+    } catch (error) { return { ok: false, error: error.message }; }
+  });
+  ipcMain.handle('provider:save-ranking-settings', async (event, input = {}) => serializeProviderWrite(async () => {
+    checkShell(event);
+    const raw = await readProviderConfig();
+    const next = {
+      schema: 2,
+      activeProfileId: raw.activeProfileId || providerProfiles(raw)[0]?.id || '',
+      profiles: providerProfiles(raw),
+      modelTiers: modelTiers.normalize(raw.modelTiers),
+      rankingSettings: { autoRefresh: input.autoRefresh !== false }
+    };
     await storeProviderConfig(next);
     return { ok: true, config: publicConfig(next) };
   }));
@@ -1923,9 +1979,13 @@ if(primaryInstance)app.whenReady().then(() => {
   createWindow();
   setTimeout(() => {
     void (async () => {
+      await readRankingsFile().catch(() => {});
       await getPairingServer().startSession({ rotateToken: false }).catch(() => {});
       try {
         const stored = await readProviderConfig();
+        if (stored.rankingSettings?.autoRefresh !== false) {
+          void refreshModelRankings({ broadcast: true }).catch(() => {});
+        }
         for (const prof of providerProfiles(stored)) {
           if (providerCapabilities.isExternalAgent(prof) && prof.autoLaunch && prof.launchCommand) {
             await externalAgent.launchAgentProcess(prof).catch(() => {});
