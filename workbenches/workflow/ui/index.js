@@ -187,8 +187,14 @@ window.PiWorkbenchModules.workflow = {
     host.addEventListener('click', () => { if (pendingRender) setTimeout(() => { if (pendingRender && !popupOpen()) { pendingRender = false; render(); } }, 0); }, true);
 
     // ---- 模型两级菜单：先厂商，再该厂商下的模型。
-    function openModelMenu(nodeId, anchor) {
+    function openModelMenu(nodeId, anchor, retried = false) {
       const pop = host.querySelector('.wf-pop'), n = data.nodes.find(x => x.id === nodeId); if (!pop || !n) return;
+      if (!models.length && !retried) {
+        api.request('wf-run', { refreshModels: true }).then(r => {
+          if (Array.isArray(r?.models) && r.models.length) models = r.models;
+          if (!pop.hidden && pop.dataset.node === nodeId) openModelMenu(nodeId, anchor, true);
+        }).catch(() => {});
+      }
       const r = anchor.getBoundingClientRect(), h = host.getBoundingClientRect();
       pop.style.left = Math.max(4, Math.min(r.left - h.left, h.width - 230)) + 'px'; pop.style.top = (r.bottom - h.top + 4) + 'px';
       const vendors = models.length ? models : [];
@@ -200,8 +206,14 @@ window.PiWorkbenchModules.workflow = {
       pop.dataset.node = nodeId;
     }
     // 子智能体菜单：列出每个子智能体、它名下的节点数和当前模型；点一行 → 厂商→模型两级菜单，选了就作用于它名下所有没手选模型的节点。
-    function openAgentMenu(anchor, only) {
+    function openAgentMenu(anchor, only, retried = false) {
       const pop = host.querySelector('.wf-pop'); if (!pop) return;
+      if (!models.length && !retried) {
+        api.request('wf-run', { refreshModels: true }).then(r => {
+          if (Array.isArray(r?.models) && r.models.length) models = r.models;
+          if (!pop.hidden && !pop.dataset.node) openAgentMenu(anchor, only, true);
+        }).catch(() => {});
+      }
       const r = anchor.getBoundingClientRect(), h = host.getBoundingClientRect();
       pop.style.left = Math.max(4, Math.min(r.left - h.left, h.width - 260)) + 'px'; pop.style.top = (r.bottom - h.top + 4) + 'px';
       pop.dataset.node = ''; pop.dataset.agent = only || '';

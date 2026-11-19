@@ -8,8 +8,19 @@ const icon=n=>'<svg class="icon" viewBox="0 0 24 24" aria-hidden="true"><path d=
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const registry=Object.create(null);
 let controller=null, layoutController=null, initial=null, pendingWorkflow=null;
+const pendingInvokes=[];
 const requests=new Map();
 let moduleReady=false;
+function runInvoke(msg){
+  try {
+    const layoutCommands=['readLayout','setLayout'];
+    if(msg.command==='setDraftHTML')layoutController?.freeze();
+    const invoker=layoutController&&layoutCommands.includes(msg.command)?layoutController:controller;
+    Promise.resolve(invoker.invoke(msg.command,msg.payload||{})).then(result=>send({type:'invoke-result',requestId:msg.requestId,result}),error=>send({type:'invoke-result',requestId:msg.requestId,error:error.message}));
+  } catch(error) {
+    send({type:'invoke-result',requestId:msg.requestId,error:error.message});
+  }
+}
 function request(operation,payload={}) {
   const requestId=crypto.randomUUID();
   return new Promise((resolve,reject)=>{
@@ -29,6 +40,7 @@ function mount(){
   controller=factory.mount(host,{data:initial,mode,target:new URLSearchParams(location.search).get('target')||null,icon,esc,request,server,save(next){initial={...next,_layout:initial?._layout};request('server',{action:'saveUIState',payload:{state:initial}}).catch(error=>send({type:'notify',message:error.message}));},notify(message){send({type:'notify',message});}});
   layoutController=key==='builder'?null:window.PiWorkbenchLayout?.({host,key,mode,data:initial,persist(next){initial={...initial,_layout:next._layout};persist();},notify(message){send({type:'notify',message});}})||null;
   if(pendingWorkflow)controller?.syncWorkflow?.(pendingWorkflow);
+  while(pendingInvokes.length)runInvoke(pendingInvokes.shift());
   send({type:'mounted',prompt:factory.prompt||''});
 }
 window.PiWorkbenchModules=registry;
@@ -52,15 +64,9 @@ window.addEventListener('message',event=>{
     controller?.syncWorkflow?.(pendingWorkflow);
     return;
   }
-  if(event.data.type==='invoke'&&controller){
-    try {
-      const layoutCommands=['readLayout','setLayout'];
-      if(event.data.command==='setDraftHTML')layoutController?.freeze();
-      const invoker=layoutController&&layoutCommands.includes(event.data.command)?layoutController:controller;
-      Promise.resolve(invoker.invoke(event.data.command,event.data.payload||{})).then(result=>send({type:'invoke-result',requestId:event.data.requestId,result}),error=>send({type:'invoke-result',requestId:event.data.requestId,error:error.message}));
-    } catch(error) {
-      send({type:'invoke-result',requestId:event.data.requestId,error:error.message});
-    }
+  if(event.data.type==='invoke'){
+    if(controller)runInvoke(event.data);
+    else pendingInvokes.push(event.data);
   }
   if(event.data.type==='freeze')layoutController?.freeze();
 });

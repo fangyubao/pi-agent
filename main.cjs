@@ -1034,7 +1034,15 @@ if(primaryInstance)app.whenReady().then(() => {
   ipcMain.handle('workflow:cancel',(event,input={})=>{checkShell(event);const c=planControllers.get(String(input.requestId||''));if(c)c.abort();return {ok:true};});
   ipcMain.handle('workflow:models',async event=>{
     try{checkShell(event);const raw=await readProviderConfig();
-      return {ok:true,result:providerProfiles(raw).filter(p=>providerCapabilities.supportsMode(p,'workflow')).map(p=>({profileId:String(p.id||'default'),vendor:String(p.name||p.provider||'API'),capabilities:providerCapabilities.normalizeCapabilities(p.capabilities,p),models:[...new Set([...(Array.isArray(p.models)?p.models:[]),...(p.model?[p.model]:[])])].slice(0,8)})).filter(v=>v.models.length)};
+      const allProfiles=providerProfiles(raw);
+      const mapVendor=p=>({
+        profileId:String(p.id||'default'),
+        vendor:String(p.name||p.provider||'API'),
+        capabilities:providerCapabilities.normalizeCapabilities(p.capabilities,p),
+        models:[...new Set([...(Array.isArray(p.models)?p.models:[]),...(p.model?[p.model]:[]),...(Array.isArray(p.discoveredModels)?p.discoveredModels.slice(0,4):[])])].filter(Boolean).slice(0,8)
+      });
+      const wfVendors=allProfiles.filter(p=>providerCapabilities.supportsMode(p,'workflow')).map(mapVendor).filter(v=>v.models.length);
+      return {ok:true,result:wfVendors.length?wfVendors:allProfiles.map(mapVendor).filter(v=>v.models.length)};
     }catch(error){return {ok:false,error:error.message};}
   });
   ipcMain.handle('window:control',(event,action)=>{
