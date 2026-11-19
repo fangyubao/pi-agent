@@ -1,6 +1,6 @@
 {
   "name": "pi-workbench-desktop",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "private": true,
   "description": "Pi Agent desktop workbench shell with local web workbenches",
   "main": "bootstrap.cjs",
